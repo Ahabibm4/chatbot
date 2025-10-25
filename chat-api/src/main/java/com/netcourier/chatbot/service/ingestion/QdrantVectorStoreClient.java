@@ -56,13 +56,16 @@ public class QdrantVectorStoreClient implements VectorStoreClient {
 
     private Map<String, Object> payloadFor(String tenantId, String docId, EmbeddedChunk chunk) {
         Map<String, Object> payload = new HashMap<>();
+        payload.put("tenantId", tenantId);
         payload.put("tenant_id", tenantId);
+        payload.put("docId", docId);
         payload.put("doc_id", docId);
-        payload.put("chunk_id", chunk.id());
+        payload.put("chunkId", chunk.id());
         payload.put("title", chunk.title());
         payload.put("page", chunk.page());
         payload.put("text", chunk.text());
         payload.put("roles", chunk.roles());
+        payload.put("metadata", chunk.metadata().asIndexPayload());
         return payload;
     }
 

@@ -7,6 +7,8 @@ public record ChatResponse(
         String tenantId,
         List<ChatMessage> messages,
         RetrievalSummary retrieval,
-        WorkflowSummary workflow
+        WorkflowSummary workflow,
+        List<Citation> citations,
+        String guardrailAction
 ) {
 }

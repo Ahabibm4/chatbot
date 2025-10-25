@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netcourier.chatbot.model.*;
 import com.netcourier.chatbot.service.intent.IntentRouter;
 import com.netcourier.chatbot.service.memory.MemoryService;
+import com.netcourier.chatbot.service.orchestration.GuardedResponse;
+import com.netcourier.chatbot.service.orchestration.OrchestrationService;
 import com.netcourier.chatbot.service.retrieval.RagService;
 import com.netcourier.chatbot.service.tools.ToolExecutionResult;
 import com.netcourier.chatbot.service.tools.ToolRegistry;
@@ -18,6 +20,7 @@ import reactor.core.publisher.Sinks;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -29,6 +32,7 @@ public class DefaultChatService implements ChatService {
     private final RagService ragService;
     private final WorkflowEngine workflowEngine;
     private final MemoryService memoryService;
+    private final OrchestrationService orchestrationService;
     private final ToolRegistry toolRegistry;
     private final ObjectMapper objectMapper;
 
@@ -36,12 +40,14 @@ public class DefaultChatService implements ChatService {
                               RagService ragService,
                               WorkflowEngine workflowEngine,
                               MemoryService memoryService,
+                              OrchestrationService orchestrationService,
                               ToolRegistry toolRegistry,
                               ObjectMapper objectMapper) {
         this.intentRouter = intentRouter;
         this.ragService = ragService;
         this.workflowEngine = workflowEngine;
         this.memoryService = memoryService;
+        this.orchestrationService = orchestrationService;
         this.toolRegistry = toolRegistry;
         this.objectMapper = objectMapper;
     }
@@ -67,14 +73,24 @@ public class DefaultChatService implements ChatService {
             sink.tryEmitNext(jsonLine("tool", result));
         }
 
+        GuardedResponse orchestrated = orchestrationService.orchestrate(request, intent, chunks, workflowResult);
+        workflowResult = workflowResult.withResponse(orchestrated.answer());
+        if (!"ALLOW".equalsIgnoreCase(orchestrated.guardrailAction())) {
+            sink.tryEmitNext(jsonLine("guardrail", Map.of("action", orchestrated.guardrailAction())));
+        }
+
         ChatMessage assistantMessage = new ChatMessage(
                 UUID.randomUUID(),
                 ChatMessageRole.ASSISTANT,
-                workflowResult.responseMessage(),
+                orchestrated.answer(),
                 OffsetDateTime.now(),
                 true
         );
         sink.tryEmitNext(jsonLine("message", assistantMessage));
+
+        if (!orchestrated.citations().isEmpty()) {
+            sink.tryEmitNext(jsonLine("citations", orchestrated.citations()));
+        }
 
         memoryService.storeAssistantMessage(request, assistantMessage, workflowResult);
 
@@ -95,10 +111,13 @@ public class DefaultChatService implements ChatService {
             workflowResult = workflowResult.withToolResult(result.toModel());
             toolResult = result.toModel();
         }
+        GuardedResponse orchestrated = orchestrationService.orchestrate(request, intent, chunks, workflowResult);
+        workflowResult = workflowResult.withResponse(orchestrated.answer());
+
         ChatMessage assistantMessage = new ChatMessage(
                 UUID.randomUUID(),
                 ChatMessageRole.ASSISTANT,
-                workflowResult.responseMessage(),
+                orchestrated.answer(),
                 OffsetDateTime.now(),
                 false
         );
@@ -114,7 +133,9 @@ public class DefaultChatService implements ChatService {
                 request.tenantId(),
                 messages,
                 new RetrievalSummary(intent, chunks),
-                new WorkflowSummary(workflowResult.workflowId(), workflowResult.state(), workflowResult.slots(), toolResult)
+                new WorkflowSummary(workflowResult.workflowId(), workflowResult.state(), workflowResult.slots(), toolResult),
+                orchestrated.citations(),
+                orchestrated.guardrailAction()
         );
     }
 

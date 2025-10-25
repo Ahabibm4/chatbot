@@ -9,5 +9,7 @@ public interface ToolAdapter {
 
     boolean supports(String toolName);
 
+    ToolSpecification specification();
+
     ToolExecutionResult execute(ChatRequest request, Map<String, Object> slots);
 }

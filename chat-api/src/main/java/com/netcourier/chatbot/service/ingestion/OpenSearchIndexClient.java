@@ -35,7 +35,7 @@ public class OpenSearchIndexClient implements SearchIndexClient {
                 openSearchWebClient.put()
                         .uri("/{index}/_doc/{id}", indexAlias, chunk.id())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .bodyValue(new SearchDocument(tenantId, docId, chunk.id(), chunk.title(), chunk.page(), chunk.text(), chunk.roles()))
+                        .bodyValue(new SearchDocument(tenantId, docId, chunk.id(), chunk.title(), chunk.page(), chunk.text(), chunk.roles(), chunk.metadata().asIndexPayload()))
                         .retrieve()
                         .bodyToMono(Void.class)
                         .onErrorResume(throwable -> {
@@ -51,11 +51,12 @@ public class OpenSearchIndexClient implements SearchIndexClient {
         }
     }
 
-    private record SearchDocument(String tenant_id,
-                                  String doc_id,
-                                  String chunk_id,
+    private record SearchDocument(String tenantId,
+                                  String docId,
+                                  String chunkId,
                                   String title,
                                   int page,
                                   String text,
-                                  List<String> roles) {}
+                                  List<String> roles,
+                                  java.util.Map<String, Object> metadata) {}
 }

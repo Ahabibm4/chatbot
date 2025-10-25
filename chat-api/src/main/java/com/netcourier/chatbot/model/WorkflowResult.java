@@ -14,4 +14,8 @@ public record WorkflowResult(
     public WorkflowResult withToolResult(ToolCallResult toolResult) {
         return new WorkflowResult(workflowId, state, slots, toolToInvoke, responseMessage, toolResult);
     }
+
+    public WorkflowResult withResponse(String response) {
+        return new WorkflowResult(workflowId, state, slots, toolToInvoke, response, toolResult);
+    }
 }

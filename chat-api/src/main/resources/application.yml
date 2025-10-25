@@ -3,6 +3,23 @@ spring:
     name: netcourier-chat-api
   main:
     web-application-type: reactive
+  datasource:
+    url: ${CHATBOT_DATABASE_URL:jdbc:postgresql://localhost:5432/chatbot}
+    username: ${CHATBOT_DATABASE_USERNAME:chatbot}
+    password: ${CHATBOT_DATABASE_PASSWORD:chatbot}
+    driver-class-name: org.postgresql.Driver
+  sql:
+    init:
+      mode: always
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          lob:
+            non_contextual_creation: true
   jackson:
     serialization:
       indent-output: true
@@ -21,10 +38,16 @@ chat:
       weight: 0.4
   qdrant:
     base-url: http://localhost:6333
-    collection: nc_chunks_v1
+    collection: nc_chunks_prod
+    vector-name: tenant_dense_v1
+    filters:
+      tenant-field: tenantId
+      role-field: roles
   opensearch:
     base-url: http://localhost:9200
-    index: nc_chunks
+    index: nc_chunks_prod
+    tenant-field: tenantId
+    roles-field: roles
   netcourier:
     base-url: http://localhost:8085
     reschedule-path: /jobs/reschedule
@@ -36,3 +59,9 @@ chat:
     chunk-size: 800
     overlap: 200
     default-roles: CP,BO
+    ocr:
+      enabled: true
+      language: eng
+  orchestration:
+    max-context-tokens: 2048
+    max-citations: 5

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import Callable, Dict, List
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -33,13 +33,18 @@ def load_model(model_name: str) -> SentenceTransformer:
         raise RuntimeError(f"Could not load model {model_name}") from exc
 
 
-def build_app(default_model: str = "BAAI/bge-small-en-v1.5") -> FastAPI:
+ModelLoader = Callable[[str], SentenceTransformer]
+
+
+def build_app(default_model: str = "BAAI/bge-small-en-v1.5",
+              model_loader: ModelLoader | None = None) -> FastAPI:
     app = FastAPI(title="NetCourier Embeddings Service", version="1.0.0")
-    model_cache: dict[str, SentenceTransformer] = {}
+    model_cache: Dict[str, SentenceTransformer] = {}
+    loader = model_loader or load_model
 
     def get_model(name: str) -> SentenceTransformer:
         if name not in model_cache:
-            model_cache[name] = load_model(name)
+            model_cache[name] = loader(name)
         return model_cache[name]
 
     @app.on_event("startup")

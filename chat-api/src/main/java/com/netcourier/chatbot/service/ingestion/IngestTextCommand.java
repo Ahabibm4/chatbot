@@ -5,5 +5,7 @@ import java.util.List;
 public record IngestTextCommand(String tenantId,
                                 String title,
                                 String text,
-                                List<String> roles) {
+                                List<String> roles,
+                                String externalId,
+                                DocumentMetadata metadata) {
 }

@@ -17,15 +17,18 @@ public class HybridRagService implements RagService {
     private final SparseRetriever sparseRetriever;
     private final double denseWeight;
     private final double sparseWeight;
+    private final int resultLimit;
 
     public HybridRagService(DenseRetriever denseRetriever,
                             SparseRetriever sparseRetriever,
                             @Value("${chat.rag.dense.weight:0.6}") double denseWeight,
-                            @Value("${chat.rag.sparse.weight:0.4}") double sparseWeight) {
+                            @Value("${chat.rag.sparse.weight:0.4}") double sparseWeight,
+                            @Value("${chat.rag.hybrid.limit:5}") int resultLimit) {
         this.denseRetriever = denseRetriever;
         this.sparseRetriever = sparseRetriever;
         this.denseWeight = denseWeight;
         this.sparseWeight = sparseWeight;
+        this.resultLimit = resultLimit;
     }
 
     @Override
@@ -37,7 +40,7 @@ public class HybridRagService implements RagService {
         sparse.forEach(chunk -> fused.merge(key(chunk), new RetrievedChunkScore(chunk, chunk.score() * sparseWeight), RetrievedChunkScore::merge));
         return fused.values().stream()
                 .sorted(Comparator.comparingDouble(RetrievedChunkScore::score).reversed())
-                .limit(5)
+                .limit(resultLimit)
                 .map(RetrievedChunkScore::chunk)
                 .toList();
     }

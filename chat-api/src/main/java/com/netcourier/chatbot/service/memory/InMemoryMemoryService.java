@@ -6,6 +6,7 @@ import com.netcourier.chatbot.model.ChatTurn;
 import com.netcourier.chatbot.model.WorkflowResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
+@Profile("inmemory")
 public class InMemoryMemoryService implements MemoryService {
 
     private static final Logger log = LoggerFactory.getLogger(InMemoryMemoryService.class);
