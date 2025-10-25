@@ -10,6 +10,8 @@ import com.netcourier.chatbot.model.WorkflowResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import reactor.core.publisher.Flux;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -42,6 +44,41 @@ public class GuardedOrchestrationService implements OrchestrationService {
                                        String intent,
                                        List<RetrievedChunk> chunks,
                                        WorkflowResult workflowResult) {
+        OrchestrationInputs inputs = buildInputs(request, intent, chunks, workflowResult);
+
+        LlmResponse llmResponse = llmClient.generate(inputs.llmRequest());
+        String guardrailAction = inputs.truncated() && !Objects.equals(llmResponse.guardrailAction(), "BLOCKED")
+                ? "TRUNCATED"
+                : llmResponse.guardrailAction();
+        return new GuardedResponse(llmResponse.answer(), inputs.citations(), guardrailAction);
+    }
+
+    @Override
+    public Flux<GuardedStreamSegment> orchestrateStream(ChatRequest request,
+                                                        String intent,
+                                                        List<RetrievedChunk> chunks,
+                                                        WorkflowResult workflowResult) {
+        OrchestrationInputs inputs = buildInputs(request, intent, chunks, workflowResult);
+        boolean truncated = inputs.truncated();
+        List<Citation> citations = inputs.citations();
+
+        return llmClient.stream(inputs.llmRequest())
+                .map(event -> {
+                    if (event.type() == LlmStreamEvent.Type.PARTIAL) {
+                        return GuardedStreamSegment.partial(event.text());
+                    }
+                    String guardrailAction = event.guardrailAction();
+                    if (truncated && !Objects.equals(guardrailAction, "BLOCKED")) {
+                        guardrailAction = "TRUNCATED";
+                    }
+                    return GuardedStreamSegment.finalSegment(event.text(), citations, guardrailAction);
+                });
+    }
+
+    private OrchestrationInputs buildInputs(ChatRequest request,
+                                            String intent,
+                                            List<RetrievedChunk> chunks,
+                                            WorkflowResult workflowResult) {
         QueryClassifier.QueryType type = classifier.classify(request, intent, chunks, workflowResult);
         List<RetrievedChunk> sorted = chunks == null ? List.of() : chunks.stream()
                 .sorted(Comparator.comparingDouble(RetrievedChunk::score).reversed())
@@ -58,12 +95,8 @@ public class GuardedOrchestrationService implements OrchestrationService {
                 type.name()
         );
 
-        LlmResponse llmResponse = llmClient.generate(llmRequest);
         List<Citation> citations = toCitations(guardedChunks.chunks());
-        String guardrailAction = guardedChunks.truncated() && !Objects.equals(llmResponse.guardrailAction(), "BLOCKED")
-                ? "TRUNCATED"
-                : llmResponse.guardrailAction();
-        return new GuardedResponse(llmResponse.answer(), citations, guardrailAction);
+        return new OrchestrationInputs(llmRequest, citations, guardedChunks.truncated());
     }
 
     private Map<String, Object> buildWorkflowContext(WorkflowResult workflowResult) {
@@ -138,4 +171,7 @@ public class GuardedOrchestrationService implements OrchestrationService {
         String title = chunk.title() == null ? "Document" : chunk.title();
         return String.format(Locale.ROOT, "%s · p.%d", title, chunk.page());
     }
+}
+
+private record OrchestrationInputs(LlmRequest llmRequest, List<Citation> citations, boolean truncated) {
 }

@@ -15,6 +15,7 @@ import com.netcourier.chatbot.model.WorkflowResult;
 import com.netcourier.chatbot.service.intent.IntentRouter;
 import com.netcourier.chatbot.service.memory.MemoryService;
 import com.netcourier.chatbot.service.orchestration.GuardedResponse;
+import com.netcourier.chatbot.service.orchestration.GuardedStreamSegment;
 import com.netcourier.chatbot.service.orchestration.OrchestrationService;
 import com.netcourier.chatbot.service.retrieval.RagService;
 import com.netcourier.chatbot.service.tools.ToolExecutionResult;
@@ -35,6 +36,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class DefaultChatService implements ChatService {
@@ -93,54 +96,39 @@ public class DefaultChatService implements ChatService {
             emit(sink, frame("tool_result", result.detail(), toolData));
         }
 
-        GuardedResponse orchestrated = orchestrationService.orchestrate(request, intent, chunks, workflowResult);
-        workflowResult = workflowResult.withResponse(orchestrated.answer());
+        AtomicReference<WorkflowResult> workflowState = new AtomicReference<>(workflowResult);
+        AtomicBoolean finalEmitted = new AtomicBoolean(false);
 
-        String guardrailAction = orchestrated.guardrailAction();
-        String finalAnswer = orchestrated.answer();
-        List<Citation> citations = orchestrated.citations() == null ? List.of() : orchestrated.citations();
+        orchestrationService.orchestrateStream(request, intent, chunks, workflowState.get())
+                .subscribe(segment -> {
+                    if (segment.type() == GuardedStreamSegment.Type.PARTIAL) {
+                        if (segment.text() != null && !segment.text().isBlank()) {
+                            emit(sink, frame("partial", segment.text(), null));
+                        }
+                        return;
+                    }
+                    finalEmitted.set(true);
+                    completeStream(sink, request, workflowState, intent, chunks, ttft, segment);
+                }, error -> {
+                    log.error("Streaming orchestration failed", error);
+                    finalEmitted.set(true);
+                    GuardedStreamSegment fallback = GuardedStreamSegment.finalSegment(
+                            fallbackMessage(),
+                            List.of(),
+                            "ERROR"
+                    );
+                    completeStream(sink, request, workflowState, intent, chunks, ttft, fallback);
+                }, () -> {
+                    if (!finalEmitted.get()) {
+                        GuardedStreamSegment fallback = GuardedStreamSegment.finalSegment(
+                                fallbackMessage(),
+                                List.of(),
+                                "ERROR"
+                        );
+                        completeStream(sink, request, workflowState, intent, chunks, ttft, fallback);
+                    }
+                });
 
-        boolean ragIntent = intent != null && intent.toUpperCase(Locale.ROOT).startsWith("RAG");
-        boolean hasSnippets = chunks != null && !chunks.isEmpty();
-        if (ragIntent && !hasSnippets) {
-            finalAnswer = "I don't know that yet. You can upload a document or try re-phrasing your question.";
-            citations = List.of();
-            guardrailAction = guardrailAction == null ? "ALLOW" : guardrailAction;
-        }
-        workflowResult = workflowResult.withResponse(finalAnswer);
-
-        if (ragIntent) {
-            meterRegistry.counter(NDJSON_CITATION_METRIC,
-                    "tenant", request.tenantId(),
-                    "present", Boolean.toString(!citations.isEmpty()))
-                    .increment();
-        }
-
-        if (guardrailAction != null && !"ALLOW".equalsIgnoreCase(guardrailAction)) {
-            meterRegistry.counter(NDJSON_GUARDRAIL_METRIC, "action", guardrailAction).increment();
-        }
-
-        Map<String, Object> finalData = new HashMap<>();
-        finalData.put("intent", intent);
-        finalData.put("citations", citations);
-        finalData.put("guardrailAction", guardrailAction);
-
-        ChatMessage assistantMessage = new ChatMessage(
-                UUID.randomUUID(),
-                ChatMessageRole.ASSISTANT,
-                finalAnswer,
-                OffsetDateTime.now(),
-                true
-        );
-        emit(sink, frame("final", finalAnswer, finalData));
-
-        memoryService.storeAssistantMessage(request, assistantMessage, workflowResult);
-
-        ttft.stop(meterRegistry.timer(NDJSON_TTFT_METRIC,
-                "tenant", request.tenantId(),
-                "intent", intent == null ? "UNKNOWN" : intent));
-
-        sink.tryEmitComplete();
         return sink.asFlux();
     }
 
@@ -198,6 +186,66 @@ public class DefaultChatService implements ChatService {
 
     private void emit(Sinks.Many<String> sink, NdjsonFrame frame) {
         sink.tryEmitNext(toJson(frame) + "\n");
+    }
+
+    private void completeStream(Sinks.Many<String> sink,
+                                ChatRequest request,
+                                AtomicReference<WorkflowResult> workflowState,
+                                String intent,
+                                List<RetrievedChunk> chunks,
+                                Timer.Sample ttft,
+                                GuardedStreamSegment finalSegment) {
+        String guardrailAction = finalSegment.guardrailAction();
+        List<Citation> citations = finalSegment.citations() == null ? List.of() : finalSegment.citations();
+        String finalAnswer = finalSegment.text() == null ? fallbackMessage() : finalSegment.text().trim();
+
+        boolean ragIntent = intent != null && intent.toUpperCase(Locale.ROOT).startsWith("RAG");
+        boolean hasSnippets = chunks != null && !chunks.isEmpty();
+        if (ragIntent && !hasSnippets) {
+            finalAnswer = "I don't know that yet. You can upload a document or try re-phrasing your question.";
+            citations = List.of();
+            guardrailAction = guardrailAction == null ? "ALLOW" : guardrailAction;
+        }
+
+        WorkflowResult updatedWorkflow = workflowState.get().withResponse(finalAnswer);
+        workflowState.set(updatedWorkflow);
+
+        if (ragIntent) {
+            meterRegistry.counter(NDJSON_CITATION_METRIC,
+                            "tenant", request.tenantId(),
+                            "present", Boolean.toString(!citations.isEmpty()))
+                    .increment();
+        }
+
+        if (guardrailAction != null && !"ALLOW".equalsIgnoreCase(guardrailAction)) {
+            meterRegistry.counter(NDJSON_GUARDRAIL_METRIC, "action", guardrailAction).increment();
+        }
+
+        Map<String, Object> finalData = new HashMap<>();
+        finalData.put("intent", intent);
+        finalData.put("citations", citations);
+        finalData.put("guardrailAction", guardrailAction);
+
+        ChatMessage assistantMessage = new ChatMessage(
+                UUID.randomUUID(),
+                ChatMessageRole.ASSISTANT,
+                finalAnswer,
+                OffsetDateTime.now(),
+                true
+        );
+        emit(sink, frame("final", finalAnswer, finalData));
+
+        memoryService.storeAssistantMessage(request, assistantMessage, updatedWorkflow);
+
+        ttft.stop(meterRegistry.timer(NDJSON_TTFT_METRIC,
+                "tenant", request.tenantId(),
+                "intent", intent == null ? "UNKNOWN" : intent));
+
+        sink.tryEmitComplete();
+    }
+
+    private String fallbackMessage() {
+        return "I'm having trouble reaching the AI assistant right now. Please try again in a moment or contact a NetCourier agent.";
     }
 
     private String toJson(NdjsonFrame frame) {

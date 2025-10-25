@@ -4,6 +4,8 @@ import com.netcourier.chatbot.model.RetrievedChunk;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import reactor.core.publisher.Flux;
+
 import java.util.List;
 
 @Component
@@ -14,6 +16,12 @@ public class TemplateLlmClient implements LlmClient {
     public LlmResponse generate(LlmRequest request) {
         String answer = synthesizeAnswer(request.userPrompt(), request.context(), request.classification());
         return LlmResponse.allow(answer);
+    }
+
+    @Override
+    public Flux<LlmStreamEvent> stream(LlmRequest request) {
+        String answer = synthesizeAnswer(request.userPrompt(), request.context(), request.classification());
+        return Flux.just(LlmStreamEvent.finalEvent(answer, "ALLOW"));
     }
 
     private String synthesizeAnswer(String userPrompt, List<RetrievedChunk> context, String classification) {

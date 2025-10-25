@@ -436,6 +436,20 @@ export class NetCourierChatbot extends LitElement {
           this.appendMessage({ role: 'assistant', content: event.text, streaming: true });
         }
         return;
+      case 'partial': {
+        if (!event.text) {
+          return;
+        }
+        const lastIndex = this.messages.length - 1;
+        const last = lastIndex >= 0 ? this.messages[lastIndex] : null;
+        if (last && last.role === 'assistant' && last.streaming) {
+          const updated: ChatMessage = { ...last, content: `${last.content ?? ''}${event.text}` };
+          this.messages = [...this.messages.slice(0, lastIndex), updated];
+        } else {
+          this.appendMessage({ role: 'assistant', content: event.text, streaming: true });
+        }
+        return;
+      }
       case 'final': {
         const data = event.data ?? {};
         const guardrailAction = data.guardrailAction as string | undefined;
@@ -443,7 +457,14 @@ export class NetCourierChatbot extends LitElement {
           this.guardrailNotice = guardrailAction;
         }
         if (event.text) {
-          this.appendMessage({ role: 'assistant', content: event.text });
+          const lastIndex = this.messages.length - 1;
+          const last = lastIndex >= 0 ? this.messages[lastIndex] : null;
+          if (last && last.role === 'assistant' && last.streaming) {
+            const updated: ChatMessage = { ...last, content: event.text, streaming: false };
+            this.messages = [...this.messages.slice(0, lastIndex), updated];
+          } else {
+            this.appendMessage({ role: 'assistant', content: event.text });
+          }
         }
         const citations = Array.isArray(data.citations) ? (data.citations as Citation[]) : [];
         if (citations.length) {

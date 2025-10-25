@@ -1,5 +1,6 @@
 package com.netcourier.chatbot.service.orchestration;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netcourier.chatbot.model.RetrievedChunk;
@@ -10,11 +11,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import reactor.core.publisher.Flux;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Component
 public class OpenAiLlmClient implements LlmClient {
@@ -41,20 +45,16 @@ public class OpenAiLlmClient implements LlmClient {
 
     @Override
     public LlmResponse generate(LlmRequest request) {
-        List<OpenAiChatClient.Message> messages = buildMessages(request);
-
         try {
-            OpenAiChatClient.ChatCompletionResponse response = chatClient.complete(
-                    new OpenAiChatClient.Request(model, messages, temperature, maxOutputTokens, Map.of())
-            );
-            OpenAiChatClient.Choice choice = response.firstChoice();
-            if (choice == null || choice.message() == null || choice.message().content() == null) {
+            LlmStreamEvent finalEvent = stream(request)
+                    .filter(event -> event.type() == LlmStreamEvent.Type.FINAL)
+                    .blockFirst();
+            if (finalEvent == null || finalEvent.text() == null || finalEvent.text().isBlank()) {
                 log.warn("LLM response was empty for classification {}", request.classification());
                 return fallbackResponse();
             }
-            String content = choice.message().content().trim();
-            String guardrail = mapGuardrail(choice.finishReason());
-            return new LlmResponse(content, guardrail);
+            String guardrail = finalEvent.guardrailAction() == null ? "ALLOW" : finalEvent.guardrailAction();
+            return new LlmResponse(finalEvent.text(), guardrail);
         } catch (OpenAiChatException ex) {
             log.error("LLM invocation failed: {}", ex.getMessage());
             return fallbackResponse();
@@ -64,9 +64,60 @@ public class OpenAiLlmClient implements LlmClient {
         }
     }
 
+    @Override
+    public Flux<LlmStreamEvent> stream(LlmRequest request) {
+        List<OpenAiChatClient.Message> messages = buildMessages(request);
+        StringBuilder content = new StringBuilder();
+        AtomicReference<String> finishReason = new AtomicReference<>();
+
+        return chatClient.stream(new OpenAiChatClient.Request(model, messages, temperature, maxOutputTokens, Map.of()))
+                .flatMap(event -> {
+                    if (event.done()) {
+                        String text = content.toString().trim();
+                        if (text.isEmpty()) {
+                            log.warn("Streaming completed without content for classification {}", request.classification());
+                            String fallback = fallbackMessage();
+                            content.append(fallback);
+                            return Flux.just(LlmStreamEvent.finalEvent(fallback, "ERROR"));
+                        }
+                        String guardrail = mapGuardrail(finishReason.get());
+                        return Flux.just(LlmStreamEvent.finalEvent(text, guardrail));
+                    }
+                    try {
+                        StreamResponse response = objectMapper.readValue(event.data(), StreamResponse.class);
+                        StreamChoice choice = response.firstChoice();
+                        if (choice == null) {
+                            return Flux.empty();
+                        }
+                        if (choice.finishReason() != null) {
+                            finishReason.set(choice.finishReason());
+                        }
+                        StreamDelta delta = choice.delta();
+                        if (delta != null && delta.content() != null && !delta.content().isBlank()) {
+                            content.append(delta.content());
+                            return Flux.just(LlmStreamEvent.partial(delta.content()));
+                        }
+                        return Flux.empty();
+                    } catch (JsonProcessingException e) {
+                        log.warn("Failed to parse streaming chunk", e);
+                        return Flux.empty();
+                    }
+                })
+                .onErrorMap(ex -> ex instanceof OpenAiChatException ? ex : new OpenAiChatException("Failed to stream chat completion", ex))
+                .concatWith(Flux.defer(() -> {
+                    if (content.length() == 0) {
+                        return Flux.just(LlmStreamEvent.finalEvent(fallbackMessage(), "ERROR"));
+                    }
+                    return Flux.empty();
+                }));
+    }
+
     private LlmResponse fallbackResponse() {
-        String message = "I'm having trouble reaching the AI assistant right now. Please try again in a moment or contact a NetCourier agent.";
-        return new LlmResponse(message, "ERROR");
+        return new LlmResponse(fallbackMessage(), "ERROR");
+    }
+
+    private String fallbackMessage() {
+        return "I'm having trouble reaching the AI assistant right now. Please try again in a moment or contact a NetCourier agent.";
     }
 
     private List<OpenAiChatClient.Message> buildMessages(LlmRequest request) {
@@ -150,5 +201,18 @@ public class OpenAiLlmClient implements LlmClient {
             case "content_filter" -> "BLOCKED";
             default -> finishReason.toUpperCase(Locale.ROOT);
         };
+    }
+
+    private record StreamResponse(List<StreamChoice> choices) {
+
+        private StreamChoice firstChoice() {
+            return choices == null || choices.isEmpty() ? null : choices.getFirst();
+        }
+    }
+
+    private record StreamChoice(StreamDelta delta, @JsonProperty("finish_reason") String finishReason) {
+    }
+
+    private record StreamDelta(@JsonProperty("content") String content) {
     }
 }

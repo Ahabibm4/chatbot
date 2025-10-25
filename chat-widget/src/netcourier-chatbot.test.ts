@@ -9,6 +9,20 @@ describe('NetCourierChatbot streaming events', () => {
     expect(messages[0]).toEqual({ role: 'assistant', content: 'Tool finished', streaming: true });
   });
 
+  it('merges partial chunks into a single assistant message', () => {
+    const element = new NetCourierChatbot();
+    (element as any).handleEvent({ type: 'partial', text: 'Hel' } satisfies StreamEvent);
+    (element as any).handleEvent({ type: 'partial', text: 'lo' } satisfies StreamEvent);
+    let messages = (element as any).messages as ChatMessage[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({ role: 'assistant', content: 'Hello', streaming: true });
+
+    (element as any).handleEvent({ type: 'final', text: 'Hello world' } satisfies StreamEvent);
+    messages = (element as any).messages as ChatMessage[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({ role: 'assistant', content: 'Hello world' });
+  });
+
   it('attaches citations on final events', () => {
     const element = new NetCourierChatbot();
     (element as any).handleEvent({
