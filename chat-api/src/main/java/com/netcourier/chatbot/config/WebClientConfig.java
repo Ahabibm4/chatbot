@@ -24,6 +24,11 @@ public class WebClientConfig {
         return baseClient(baseUrl);
     }
 
+    @Bean
+    public WebClient embeddingsWebClient(@Value("${chat.embeddings.base-url:http://localhost:9000}") String baseUrl) {
+        return baseClient(baseUrl);
+    }
+
     private WebClient baseClient(String baseUrl) {
         ExchangeStrategies strategies = ExchangeStrategies.builder()
                 .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(4 * 1024 * 1024))
