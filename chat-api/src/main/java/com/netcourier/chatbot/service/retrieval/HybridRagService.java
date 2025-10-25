@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -36,25 +37,56 @@ public class HybridRagService implements RagService {
         List<RetrievedChunk> dense = denseRetriever.search(request, intent);
         List<RetrievedChunk> sparse = sparseRetriever.search(request, intent);
         Map<String, RetrievedChunkScore> fused = new LinkedHashMap<>();
-        dense.forEach(chunk -> fused.merge(key(chunk), new RetrievedChunkScore(chunk, chunk.score() * denseWeight), RetrievedChunkScore::merge));
-        sparse.forEach(chunk -> fused.merge(key(chunk), new RetrievedChunkScore(chunk, chunk.score() * sparseWeight), RetrievedChunkScore::merge));
+        applyReciprocalRankScores(dense, denseWeight, fused);
+        applyReciprocalRankScores(sparse, sparseWeight, fused);
         return fused.values().stream()
-                .sorted(Comparator.comparingDouble(RetrievedChunkScore::score).reversed())
+                .sorted(Comparator
+                        .comparingDouble(RetrievedChunkScore::score)
+                        .reversed()
+                        .thenComparing(RetrievedChunkScore::global)
+                        .thenComparing(score -> score.chunk().docId(), Comparator.nullsLast(String::compareTo)))
                 .limit(resultLimit)
-                .map(RetrievedChunkScore::chunk)
+                .map(RetrievedChunkScore::chunkWithFusedScore)
                 .toList();
     }
 
-    private String key(RetrievedChunk chunk) {
-        return chunk.docId() + ":" + chunk.page();
+    private void applyReciprocalRankScores(List<RetrievedChunk> chunks,
+                                           double weight,
+                                           Map<String, RetrievedChunkScore> fused) {
+        for (int i = 0; i < chunks.size(); i++) {
+            RetrievedChunk chunk = chunks.get(i);
+            double contribution = weight / (i + 1d);
+            fused.merge(key(chunk),
+                    new RetrievedChunkScore(chunk, contribution, chunk.score(), isGlobalChunk(chunk)),
+                    RetrievedChunkScore::merge);
+        }
     }
 
-    private record RetrievedChunkScore(RetrievedChunk chunk, double score) {
+    private String key(RetrievedChunk chunk) {
+        return chunk.docId() == null ? "" : chunk.docId();
+    }
+
+    private boolean isGlobalChunk(RetrievedChunk chunk) {
+        if (chunk.docId() == null) {
+            return false;
+        }
+        String normalized = chunk.docId().toUpperCase(Locale.ROOT);
+        return normalized.startsWith("GLOBAL");
+    }
+
+    private record RetrievedChunkScore(RetrievedChunk chunk, double score, double bestSourceScore, boolean global) {
         RetrievedChunkScore merge(RetrievedChunkScore other) {
-            if (other.score > score) {
-                return new RetrievedChunkScore(other.chunk, score + other.score);
+            RetrievedChunk bestChunk = chunk;
+            double bestScore = bestSourceScore;
+            if (other.bestSourceScore > bestSourceScore) {
+                bestChunk = other.chunk;
+                bestScore = other.bestSourceScore;
             }
-            return new RetrievedChunkScore(chunk, score + other.score);
+            return new RetrievedChunkScore(bestChunk, score + other.score, bestScore, global || other.global);
+        }
+
+        RetrievedChunk chunkWithFusedScore() {
+            return new RetrievedChunk(chunk.docId(), chunk.title(), chunk.page(), chunk.text(), score, chunk.source());
         }
     }
 }

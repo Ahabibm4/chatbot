@@ -12,6 +12,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,6 +20,8 @@ import java.util.Optional;
 public class QdrantDenseRetriever implements DenseRetriever {
 
     private static final Logger log = LoggerFactory.getLogger(QdrantDenseRetriever.class);
+
+    private static final String GLOBAL_TENANT_ID = "GLOBAL";
 
     private final WebClient qdrantWebClient;
     private final String collection;
@@ -46,7 +49,18 @@ public class QdrantDenseRetriever implements DenseRetriever {
         String query = Optional.ofNullable(request.turns().isEmpty() ? null : request.turns().getLast().content())
                 .filter(content -> !content.isBlank())
                 .orElse("Hello");
-        DenseQueryPayload payload = new DenseQueryPayload(query, topK, vectorName, buildFilter(request));
+        List<RetrievedChunk> combined = new ArrayList<>();
+        QueryFilter tenantFilter = buildFilter(request, request.tenantId());
+        combined.addAll(executeSearch(new DenseQueryPayload(query, topK, vectorName, tenantFilter)));
+        if (!GLOBAL_TENANT_ID.equals(request.tenantId())) {
+            QueryFilter globalFilter = buildFilter(request, GLOBAL_TENANT_ID);
+            combined.addAll(executeSearch(new DenseQueryPayload(query, topK, vectorName, globalFilter)));
+        }
+        combined.sort(Comparator.comparingDouble(RetrievedChunk::score).reversed());
+        return combined;
+    }
+
+    private List<RetrievedChunk> executeSearch(DenseQueryPayload payload) {
         try {
             QdrantResponse response = qdrantWebClient.post()
                     .uri("/collections/{collection}/points/search", collection)
@@ -69,8 +83,8 @@ public class QdrantDenseRetriever implements DenseRetriever {
         }
     }
 
-    private QueryFilter buildFilter(ChatRequest request) {
-        QueryFilterBuilder builder = new QueryFilterBuilder().mustMatch(tenantField, request.tenantId());
+    private QueryFilter buildFilter(ChatRequest request, String tenantId) {
+        QueryFilterBuilder builder = new QueryFilterBuilder().mustMatch(tenantField, tenantId);
         if (request.context() != null && request.context().roles() != null && !request.context().roles().isEmpty()) {
             builder.mustAny(roleField, request.context().roles().stream().toList());
         }

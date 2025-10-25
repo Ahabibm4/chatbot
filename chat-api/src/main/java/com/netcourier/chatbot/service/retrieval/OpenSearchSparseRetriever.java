@@ -22,6 +22,8 @@ public class OpenSearchSparseRetriever implements SparseRetriever {
 
     private static final Logger log = LoggerFactory.getLogger(OpenSearchSparseRetriever.class);
 
+    private static final String GLOBAL_TENANT_ID = "GLOBAL";
+
     private final WebClient openSearchWebClient;
     private final String indexAlias;
     private final int topK;
@@ -70,7 +72,14 @@ public class OpenSearchSparseRetriever implements SparseRetriever {
 
     private OpenSearchQuery buildQuery(ChatRequest request, String queryText) {
         List<Map<String, Object>> filters = new ArrayList<>();
-        filters.add(Map.of("term", Map.of(tenantField, request.tenantId())));
+        List<String> tenants = new ArrayList<>();
+        if (request.tenantId() != null && !request.tenantId().isBlank()) {
+            tenants.add(request.tenantId());
+        }
+        if (!tenants.contains(GLOBAL_TENANT_ID)) {
+            tenants.add(GLOBAL_TENANT_ID);
+        }
+        filters.add(Map.of("terms", Map.of(tenantField, List.copyOf(tenants))));
         if (request.context() != null && request.context().roles() != null && !request.context().roles().isEmpty()) {
             filters.add(Map.of("terms", Map.of(rolesField, request.context().roles())));
         }
