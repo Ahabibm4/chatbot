@@ -36,7 +36,10 @@ Phase-one of the ingestion workflow ships two administrative endpoints that inge
 * `POST /admin/ingest/upload` accepts `multipart/form-data` uploads for PDF, DOCX, and TXT files.
 * `POST /api/ingest` ingests plain text payloads as JSON.
 
-Both endpoints expect a tenant identifier, optional title, and optional role tags. When no roles are supplied, the service tags chunks with the default `CP` and `BO` roles so they are visible to both customer-portal and back-office users. During phase-one you can authenticate by passing a static bearer token: `Authorization: Bearer DEV`.
+Both endpoints expect a tenant identifier, optional title, and optional role tags. When no roles are supplied, the service tags chunks with the default `CP` and `BO` roles so they are visible to both customer-portal and back-office users. Authentication is handled by the WebFlux security filter chain:
+
+* Set `chat.security.static-token` (for example export `CHAT_SECURITY_STATIC_TOKEN=DEV`) to require a shared bearer token that must be supplied via the `Authorization` header.
+* Leave the property unset to use the default OAuth2 JWT resource server configuration.
 
 Example file upload using `curl`:
 
@@ -83,7 +86,7 @@ This command provisions Qdrant, OpenSearch, PostgreSQL, the chat API, and the em
 
 ## Security & Observability
 
-The implementation includes JWT-based authentication hooks, role conversion, and placeholders for audit logging, tracing, and metrics that align with the system-level design.
+The implementation includes JWT-based authentication hooks, role conversion, and placeholders for audit logging, tracing, and metrics that align with the system-level design. For local or shared-secret deployments, configure `chat.security.static-token` to enforce a static bearer token; omitting the property keeps the OAuth2 JWT resource server flow enabled.
 
 ## Next Steps
 
