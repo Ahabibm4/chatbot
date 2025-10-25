@@ -18,7 +18,7 @@ export type ChatMessage = {
 export type StreamEvent = {
   type: string;
   text?: string;
-  data?: any;
+  metadata?: any;
 };
 
 type TranslationStrings = {
@@ -427,9 +427,33 @@ export class NetCourierChatbot extends LitElement {
     }
   }
 
+  private updateStreamingMessage(content: string, streaming: boolean) {
+    if (!content) {
+      return;
+    }
+    if (this.messages.length) {
+      const lastIndex = this.messages.length - 1;
+      const last = this.messages[lastIndex];
+      if (last.role === 'assistant' && last.streaming) {
+        const updated = { ...last, content, streaming };
+        this.messages = [...this.messages.slice(0, lastIndex), updated];
+        return;
+      }
+    }
+    this.appendMessage({ role: 'assistant', content, streaming });
+  }
+
   private handleEvent(event: StreamEvent) {
     switch (event.type) {
       case 'thinking':
+        return;
+      case 'partial':
+        if (event.text) {
+          this.updateStreamingMessage(event.text, true);
+        }
+        if (event.metadata && Array.isArray(event.metadata.citations)) {
+          this.attachCitations(event.metadata.citations as Citation[]);
+        }
         return;
       case 'tool_result':
         if (event.text) {
@@ -437,15 +461,15 @@ export class NetCourierChatbot extends LitElement {
         }
         return;
       case 'final': {
-        const data = event.data ?? {};
-        const guardrailAction = data.guardrailAction as string | undefined;
+        const metadata = event.metadata ?? {};
+        const guardrailAction = metadata.guardrailAction as string | undefined;
         if (guardrailAction && guardrailAction !== 'ALLOW') {
           this.guardrailNotice = guardrailAction;
         }
         if (event.text) {
-          this.appendMessage({ role: 'assistant', content: event.text });
+          this.updateStreamingMessage(event.text, false);
         }
-        const citations = Array.isArray(data.citations) ? (data.citations as Citation[]) : [];
+        const citations = Array.isArray(metadata.citations) ? (metadata.citations as Citation[]) : [];
         if (citations.length) {
           this.attachCitations(citations);
         }
@@ -454,8 +478,8 @@ export class NetCourierChatbot extends LitElement {
         return;
       }
       default:
-        if (event.data && Array.isArray(event.data.citations)) {
-          this.attachCitations(event.data.citations as Citation[]);
+        if (event.metadata && Array.isArray(event.metadata.citations)) {
+          this.attachCitations(event.metadata.citations as Citation[]);
         }
     }
   }
