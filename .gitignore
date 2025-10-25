@@ -1,0 +1,19 @@
+# Java / Maven
+chat-api/target/
+chat-api/.idea/
+chat-api/.project
+chat-api/.classpath
+
+# Python
+embeddings-service/.venv/
+__pycache__/
+
+# Node
+chat-widget/node_modules/
+chat-widget/dist/
+
+# General
+.DS_Store
+.idea/
+.vscode/
+.env
