@@ -1,0 +1,89 @@
+name: Knowledge Base Ingestion
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'scripts/kb_ingest.py'
+      - '.github/workflows/kb-ingest.yml'
+  workflow_dispatch:
+    inputs:
+      target_index:
+        description: OpenSearch index that should become the active alias after a full rebuild
+        required: false
+        type: string
+
+jobs:
+  incremental:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ingestion dependencies
+        run: pip install --disable-pip-version-check -r scripts/requirements.txt
+
+      - name: Upload changed documents
+        env:
+          INGEST_BASE_URL: ${{ secrets.INGEST_BASE_URL }}
+          INGEST_TENANT_ID: ${{ secrets.INGEST_TENANT_ID }}
+          INGEST_AUTH_TOKEN: ${{ secrets.INGEST_AUTH_TOKEN }}
+          INGEST_DEFAULT_ROLES: ${{ secrets.INGEST_DEFAULT_ROLES }}
+          INGEST_VERIFY_SSL: ${{ secrets.INGEST_VERIFY_SSL }}
+        run: |
+          BEFORE_SHA="${{ github.event.before }}"
+          if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] || [ -z "$BEFORE_SHA" ]; then
+            BEFORE_SHA=$(git rev-list --max-parents=0 HEAD | tail -n 1)
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE_SHA" HEAD -- 'docs/**')
+          if [ -z "$CHANGED" ]; then
+            echo "No documentation changes detected; skipping ingestion."
+            exit 0
+          fi
+          readarray -t FILES <<< "$CHANGED"
+          python scripts/kb_ingest.py incremental --files "${FILES[@]}"
+
+  full-rebuild:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ingestion dependencies
+        run: pip install --disable-pip-version-check -r scripts/requirements.txt
+
+      - name: Rebuild knowledge base
+        env:
+          INGEST_BASE_URL: ${{ secrets.INGEST_BASE_URL }}
+          INGEST_TENANT_ID: ${{ secrets.INGEST_TENANT_ID }}
+          INGEST_AUTH_TOKEN: ${{ secrets.INGEST_AUTH_TOKEN }}
+          INGEST_DEFAULT_ROLES: ${{ secrets.INGEST_DEFAULT_ROLES }}
+          INGEST_VERIFY_SSL: ${{ secrets.INGEST_VERIFY_SSL }}
+          KB_OPENSEARCH_URL: ${{ secrets.KB_OPENSEARCH_URL }}
+          KB_OPENSEARCH_ALIAS: ${{ secrets.KB_OPENSEARCH_ALIAS }}
+          KB_OPENSEARCH_USERNAME: ${{ secrets.KB_OPENSEARCH_USERNAME }}
+          KB_OPENSEARCH_PASSWORD: ${{ secrets.KB_OPENSEARCH_PASSWORD }}
+          KB_OPENSEARCH_VERIFY_SSL: ${{ secrets.KB_OPENSEARCH_VERIFY_SSL }}
+        run: |
+          TARGET_INDEX="${{ inputs.target_index }}"
+          if [ -n "$TARGET_INDEX" ]; then
+            python scripts/kb_ingest.py full --docs-dir docs --target-index "$TARGET_INDEX"
+          else
+            python scripts/kb_ingest.py full --docs-dir docs
+          fi
