@@ -71,7 +71,7 @@ public class OpenAiLlmClient implements LlmClient {
         AtomicReference<String> finishReason = new AtomicReference<>();
 
         return chatClient.stream(new OpenAiChatClient.Request(model, messages, temperature, maxOutputTokens, Map.of()))
-                .flatMap(event -> {
+                .concatMap(event -> {
                     if (event.done()) {
                         String text = content.toString().trim();
                         if (text.isEmpty()) {
