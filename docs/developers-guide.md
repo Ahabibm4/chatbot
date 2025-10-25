@@ -8,7 +8,7 @@ The repository is organised as a polyglot monorepo:
 
 | Path | Description |
 | --- | --- |
-| `chat-api/` | Spring Boot WebFlux service that routes intents, orchestrates RAG retrieval, executes NetCourier workflows, and exposes REST + SSE chat endpoints. |
+| `chat-api/` | Spring Boot WebFlux service that routes intents, orchestrates RAG retrieval, executes NetCourier workflows, and exposes an NDJSON streaming chat endpoint. |
 | `embeddings-service/` | FastAPI microservice that wraps SentenceTransformers and exposes `/embed` and `/health`. |
 | `chat-widget/` | Lit web component that renders the chatbot UI and connects to the API. |
 | `infra/` | Docker Compose stack for running the entire system locally. |
@@ -18,8 +18,8 @@ The repository is organised as a polyglot monorepo:
 ### Chat API (Java 21)
 
 * Entry point: `ChatApiApplication` enables Spring Boot and async execution for workflow + retrieval calls.【F:chat-api/src/main/java/com/netcourier/chatbot/ChatApiApplication.java†L1-L14】
-* HTTP surface: `ChatController` exposes `/api/chat` for request/response conversations and `/api/chat/stream` for SSE streams.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L1-L34】
-* Conversation flow: `DefaultChatService` coordinates memory, intent routing, hybrid RAG, workflow execution, and tool invocation before persisting assistant turns and emitting SSE frames.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L1-L120】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L122-L187】
+* HTTP surface: `ChatController` exposes `/api/chat` for NDJSON streaming conversations and `/api/chat/sync` for one-shot JSON replies.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L1-L34】
+* Conversation flow: `DefaultChatService` coordinates memory, intent routing, hybrid RAG, workflow execution, and tool invocation before persisting assistant turns and emitting NDJSON frames (`thinking`, `tool_result`, `final`).【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L1-L203】
 * Retrieval: `HybridRagService` fuses Qdrant dense similarity and OpenSearch BM25 results with configurable weights and top-k limits.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/HybridRagService.java†L1-L54】
 * Ingestion: `IngestionController` surfaces `POST /admin/ingest/upload` (multipart) and `POST /api/ingest` (JSON text) so administrators can push tenant knowledge into the vector and search stores.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/IngestionController.java†L1-L63】 `DefaultIngestionService` orchestrates extraction via Apache Tika, chunking, embedding, and persistence to Qdrant/OpenSearch with consistent metadata.【F:chat-api/src/main/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionService.java†L1-L120】【F:chat-api/src/main/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionService.java†L122-L196】
 * External systems:
@@ -42,7 +42,7 @@ The repository is organised as a polyglot monorepo:
 
 * Custom element `<nc-chatbot>` defined in `src/netcourier-chatbot.ts` exposes attributes for API base URL, tenant ID, user ID, locale, UI surface, and theme.【F:chat-widget/src/netcourier-chatbot.ts†L1-L64】
 * Messages are stored via Lit `@state` properties and auto-scroll after each update.【F:chat-widget/src/netcourier-chatbot.ts†L66-L114】
-* Sends REST requests to `/api/chat` while listening to `/api/chat/stream` SSE for incremental updates.【F:chat-widget/src/netcourier-chatbot.ts†L116-L198】
+* Streams NDJSON responses from `/api/chat` using the Fetch API and Lit reactivity to append assistant updates as they arrive.【F:chat-widget/src/netcourier-chatbot.ts†L214-L342】
 
 ### Infrastructure
 
@@ -72,7 +72,7 @@ mvn spring-boot:run
 
 * Profiles: defaults to local development. Compose stack sets `SPRING_PROFILES_ACTIVE=prod` and JDBC URLs for Postgres.
 * Run unit tests with `mvn test`; the ingestion suite (`DefaultIngestionServiceTest`, `FixedSizeTextChunkerTest`) demonstrates mocking collaborators and validating chunk post-processing.【F:chat-api/src/test/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionServiceTest.java†L1-L79】【F:chat-api/src/test/java/com/netcourier/chatbot/service/ingestion/FixedSizeTextChunkerTest.java†L1-L62】
-* For live SSE testing, POST JSON payloads to `/api/chat/stream` using tools like `curl` or [EventSource polyfills].
+* For live stream testing, POST JSON payloads to `/api/chat` and read the newline-delimited response.
 
 #### Embeddings service
 
@@ -139,8 +139,8 @@ Configure these via `application.yml`, `application-*.yml`, or environment varia
 
 ## Troubleshooting tips
 
-* SSE stream stuck? Ensure the client is connected to `/api/chat/stream` with the same tenant/user metadata used in the REST call, and verify `DefaultChatService` emits `status` / `message` events.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L47-L109】
+* Stream stuck? Verify the client posts to `/api/chat`, consumes NDJSON frames, and receives `thinking`, optional `tool_result`, then `final` events.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L47-L178】
 * Retrieval returns empty results? Check upstream Qdrant/OpenSearch URLs and credentials; the retrievers log warnings and fall back to empty lists on errors.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/QdrantDenseRetriever.java†L33-L72】【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/OpenSearchSparseRetriever.java†L33-L66】
-* Tool invocation failures bubble up through `ToolExecutionResult` messages in the SSE payload—surface them in the widget or logs as needed.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L62-L109】
+* Tool invocation failures bubble up through `tool_result` frames—surface them in the widget or logs as needed.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L69-L104】
 
 Refer to `TECHNICAL_DESIGN.md` for the higher-level system design that complements this implementation guide.
