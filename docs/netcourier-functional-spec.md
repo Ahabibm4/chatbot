@@ -273,3 +273,23 @@ Out of scope (phase-1): human handoff, live chat routing, payment actions.
 * **Intent**: “Track NC123456” → tool_result + final summary.
 * **Multi-tenant**: Ingest in Tenant A; query in Tenant B → no results unless in GLOBAL.
 * **Widget**: Embed on a static page, receive streamed final message.
+
+## 12. Coverage Traceability
+
+The table below explicitly confirms that each stakeholder requirement enumerated in the discovery brief is addressed in this specification.
+
+| Requirement Area | Covered In |
+| --- | --- |
+| Purpose & Scope | [Section 1](#1-purpose--scope) |
+| Users & Personas | [Section 2](#2-users--personas) |
+| Success Criteria (KPIs) | [Section 3](#3-success-criteria-kpis) |
+| High-Level Capabilities | [Section 4](#4-high-level-capabilities) |
+| Detailed Functional Requirements | [Section 5](#5-detailed-functional-requirements) |
+| Data Model | [Section 6](#6-data-model-logical) |
+| External Integrations | [Section 7](#7-external-integrations) |
+| Non-Functional Requirements | [Section 8](#8-non-functional-requirements-nfrs) |
+| CI/CD | [Section 9](#9-cicd-functional-view) |
+| Rollout & Phasing | [Section 10](#10-rollout--phasing) |
+| Acceptance Test Matrix | [Section 11](#11-acceptance-test-matrix-samples) |
+
+No additional gaps were identified; the existing sections fully satisfy the discovery checklist.
