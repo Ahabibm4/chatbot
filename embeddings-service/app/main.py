@@ -78,7 +78,9 @@ def build_app(default_model: str = "BAAI/bge-m3",
         except Exception as exc:
             logger.exception("Embedding computation failed")
             raise HTTPException(status_code=500, detail="Embedding computation failed") from exc
-        return EmbedResponse(vectors=vectors.tolist(), model=model_name, dimensions=len(vectors[0]) if vectors else 0)
+        vector_list = vectors.tolist()
+        dimensions = len(vector_list[0]) if vector_list else 0
+        return EmbedResponse(vectors=vector_list, model=model_name, dimensions=dimensions)
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
