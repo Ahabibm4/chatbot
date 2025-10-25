@@ -1,14 +1,12 @@
 package com.netcourier.chatbot.service;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netcourier.chatbot.model.ChatMessage;
 import com.netcourier.chatbot.model.ChatMessageRole;
 import com.netcourier.chatbot.model.ChatRequest;
 import com.netcourier.chatbot.model.ChatResponse;
 import com.netcourier.chatbot.model.ChatTurn;
 import com.netcourier.chatbot.model.Citation;
+import com.netcourier.chatbot.model.ChatEvent;
 import com.netcourier.chatbot.model.RetrievedChunk;
 import com.netcourier.chatbot.model.ToolCallResult;
 import com.netcourier.chatbot.model.WorkflowResult;
@@ -22,8 +20,6 @@ import com.netcourier.chatbot.service.tools.ToolRegistry;
 import com.netcourier.chatbot.service.workflow.WorkflowEngine;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -39,7 +35,6 @@ import java.util.UUID;
 @Service
 public class DefaultChatService implements ChatService {
 
-    private static final Logger log = LoggerFactory.getLogger(DefaultChatService.class);
     private static final String NDJSON_GUARDRAIL_METRIC = "chat.guardrail.actions";
     private static final String NDJSON_TTFT_METRIC = "chat.ttft";
     private static final String NDJSON_CITATION_METRIC = "chat.citations";
@@ -50,7 +45,6 @@ public class DefaultChatService implements ChatService {
     private final MemoryService memoryService;
     private final OrchestrationService orchestrationService;
     private final ToolRegistry toolRegistry;
-    private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
     public DefaultChatService(IntentRouter intentRouter,
@@ -59,7 +53,6 @@ public class DefaultChatService implements ChatService {
                               MemoryService memoryService,
                               OrchestrationService orchestrationService,
                               ToolRegistry toolRegistry,
-                              ObjectMapper objectMapper,
                               MeterRegistry meterRegistry) {
         this.intentRouter = intentRouter;
         this.ragService = ragService;
@@ -67,18 +60,17 @@ public class DefaultChatService implements ChatService {
         this.memoryService = memoryService;
         this.orchestrationService = orchestrationService;
         this.toolRegistry = toolRegistry;
-        this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
     }
 
     @Override
-    public Flux<String> streamChat(ChatRequest request) {
-        Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
+    public Flux<ChatEvent> streamChat(ChatRequest request) {
+        Sinks.Many<ChatEvent> sink = Sinks.many().unicast().onBackpressureBuffer();
         Timer.Sample ttft = Timer.start(meterRegistry);
 
         memoryService.appendTurns(request);
 
-        emit(sink, frame("thinking", "router", null));
+        emit(sink, ChatEvent.thinking("router", null));
 
         var intent = intentRouter.route(request);
         List<RetrievedChunk> chunks = ragService.retrieve(request, intent);
@@ -90,7 +82,7 @@ public class DefaultChatService implements ChatService {
             Map<String, Object> toolData = new HashMap<>();
             toolData.put("tool", result.toolName());
             toolData.put("success", result.success());
-            emit(sink, frame("tool_result", result.detail(), toolData));
+            emit(sink, ChatEvent.toolResult(result.detail(), toolData));
         }
 
         GuardedResponse orchestrated = orchestrationService.orchestrate(request, intent, chunks, workflowResult);
@@ -132,7 +124,15 @@ public class DefaultChatService implements ChatService {
                 OffsetDateTime.now(),
                 true
         );
-        emit(sink, frame("final", finalAnswer, finalData));
+        List<String> partials = buildPartialMessages(finalAnswer);
+        for (int i = 0; i < partials.size(); i++) {
+            Map<String, Object> partialMetadata = new HashMap<>();
+            partialMetadata.put("index", i);
+            partialMetadata.put("total", partials.size());
+            emit(sink, ChatEvent.partial(partials.get(i), partialMetadata));
+        }
+
+        emit(sink, ChatEvent.finalResponse(finalAnswer, finalData));
 
         memoryService.storeAssistantMessage(request, assistantMessage, workflowResult);
 
@@ -196,23 +196,30 @@ public class DefaultChatService implements ChatService {
         );
     }
 
-    private void emit(Sinks.Many<String> sink, NdjsonFrame frame) {
-        sink.tryEmitNext(toJson(frame) + "\n");
+    private void emit(Sinks.Many<ChatEvent> sink, ChatEvent event) {
+        sink.tryEmitNext(event);
     }
 
-    private String toJson(NdjsonFrame frame) {
-        try {
-            return objectMapper.writeValueAsString(frame);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize NDJSON frame of type {}", frame.type(), e);
-            return "{\"type\":\"error\"}";
+    private List<String> buildPartialMessages(String text) {
+        if (text == null || text.isBlank()) {
+            return List.of();
         }
-    }
-
-    private record NdjsonFrame(String type, String text, @JsonInclude(JsonInclude.Include.NON_NULL) Object data) {
-    }
-
-    private NdjsonFrame frame(String type, String text, Object data) {
-        return new NdjsonFrame(type, text, data);
+        List<String> partials = new ArrayList<>();
+        String[] words = text.trim().split("\\s+");
+        StringBuilder builder = new StringBuilder();
+        for (String word : words) {
+            if (word.isEmpty()) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(word);
+            partials.add(builder.toString());
+        }
+        if (partials.isEmpty()) {
+            partials.add(text);
+        }
+        return partials;
     }
 }

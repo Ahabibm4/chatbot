@@ -1,5 +1,6 @@
 package com.netcourier.chatbot.controller;
 
+import com.netcourier.chatbot.model.ChatEvent;
 import com.netcourier.chatbot.model.ChatRequest;
 import com.netcourier.chatbot.model.ChatRequestFactory;
 import com.netcourier.chatbot.model.ChatResponse;
@@ -24,7 +25,7 @@ public class ChatController {
     }
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_NDJSON_VALUE)
-    public Flux<String> stream(@Valid @RequestBody ChatSubmission submission) {
+    public Flux<ChatEvent> stream(@Valid @RequestBody ChatSubmission submission) {
         ChatRequest request = ChatRequestFactory.fromSubmission(submission);
         return chatService.streamChat(request);
     }
