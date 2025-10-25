@@ -34,9 +34,9 @@ The repository is organised as a polyglot monorepo:
 
 ### Embeddings service (Python 3.10+)
 
-* FastAPI application built in `app/main.py` with `/embed` and `/health` routes. Models are cached per identifier and default to `BAAI/bge-small-en-v1.5`.【F:embeddings-service/app/main.py†L1-L46】
+* FastAPI application built in `app/main.py` with `/embed` and `/health` routes. Models are cached per identifier and default to `BAAI/bge-m3`.【F:embeddings-service/app/main.py†L1-L61】
 * `load_model` centralises SentenceTransformer loading and wraps exceptions for observability.【F:embeddings-service/app/main.py†L18-L28】
-* Startup hook warms the default model to reduce first-request latency.【F:embeddings-service/app/main.py†L30-L36】
+* Startup hook warms the default model to reduce first-request latency and now supports asynchronous warm-up for larger checkpoints like `bge-m3`.【F:embeddings-service/app/main.py†L38-L61】
 
 ### Chat widget (TypeScript + Lit)
 
@@ -82,7 +82,8 @@ uv sync  # or pip install -e .[dev]
 uvicorn app.main:app --reload
 ```
 
-* `POST /embed` with `{ "texts": ["Sample"], "model": null }` to retrieve vectors.
+* `POST /embed` with `{ "texts": ["Sample"], "model": null }` to retrieve vectors (1024 dimensions, unit-normalised by default).
+* The first download of `BAAI/bge-m3` exceeds 1 GB—export `HF_HUB_ENABLE_HF_TRANSFER=1` (requires `pip install hf-transfer`) to stream checkpoints faster, or pre-sync the model during image builds.
 * Run tests with `uv run pytest` when test suite is expanded.
 
 #### Chat widget
