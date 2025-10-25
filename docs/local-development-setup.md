@@ -132,6 +132,22 @@ This binds services to:
 * Qdrant – `http://localhost:6333`
 * OpenSearch – `http://localhost:9200`
 
+By default the chat API looks for embeddings on `http://localhost:9000` via the
+`chat.embeddings.base-url` property.【F:chat-api/src/main/resources/application.yml†L56-L60】
+When running under Docker Compose you must override this so the API reaches the
+`embeddings` container. Add the following environment variable to the
+`chat-api` service before starting the stack:
+
+```yaml
+  chat-api:
+    environment:
+      CHAT_EMBEDDINGS_BASE_URL: http://embeddings:8000
+```
+
+This instructs Spring to call the embeddings backend over the Compose network,
+while the port 8000 binding remains available on the host for debugging or
+manual calls.【F:infra/docker-compose.yml†L1-L24】
+
 Stop the stack with `CTRL+C` or `docker compose down`.
 
 ## 7. Running Tests Across Modules
