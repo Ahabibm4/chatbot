@@ -19,14 +19,14 @@ The repository is organised as a polyglot monorepo:
 
 * Entry point: `ChatApiApplication` enables Spring Boot and async execution for workflow + retrieval calls.【F:chat-api/src/main/java/com/netcourier/chatbot/ChatApiApplication.java†L1-L14】
 * HTTP surface: `ChatController` exposes `/api/chat` for NDJSON streaming conversations and `/api/chat/sync` for one-shot JSON replies.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L1-L34】
-* Conversation flow: `DefaultChatService` coordinates memory, intent routing, hybrid RAG, workflow execution, and tool invocation before persisting assistant turns and emitting NDJSON frames (`thinking`, `tool_result`, `final`).【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L1-L203】
-* Retrieval: `HybridRagService` fuses Qdrant dense similarity and OpenSearch BM25 results with configurable weights and top-k limits.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/HybridRagService.java†L1-L54】
+* Conversation flow: `DefaultChatService` coordinates memory, intent routing, hybrid RAG, workflow execution, and tool invocation before persisting assistant turns and emitting NDJSON frames (`thinking`, `tool_result`, `final`).【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L42-L203】
+* Retrieval: `HybridRagService` fuses Qdrant dense similarity and OpenSearch BM25 results with configurable weights and top-k limits.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/HybridRagService.java†L18-L90】
 * Ingestion: `IngestionController` surfaces `POST /admin/ingest/upload` (multipart) and `POST /api/ingest` (JSON text) so administrators can push tenant knowledge into the vector and search stores.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/IngestionController.java†L1-L63】 `DefaultIngestionService` orchestrates extraction via Apache Tika, chunking, embedding, and persistence to Qdrant/OpenSearch with consistent metadata.【F:chat-api/src/main/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionService.java†L1-L120】【F:chat-api/src/main/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionService.java†L122-L196】
 * External systems:
-  * Qdrant dense retriever issues `/points/search` queries to the configured collection.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/QdrantDenseRetriever.java†L1-L74】
-  * OpenSearch sparse retriever runs `_search` against the multi-tenant index alias.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/OpenSearchSparseRetriever.java†L1-L67】
+  * Qdrant dense retriever issues `/points/search` queries to the configured collection.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/QdrantDenseRetriever.java†L24-L98】
+  * OpenSearch sparse retriever runs `_search` against the multi-tenant index alias.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/OpenSearchSparseRetriever.java†L24-L114】
   * Tool adapters wrap NetCourier REST endpoints for tracking jobs, rescheduling deliveries, and creating tickets.【F:chat-api/src/main/java/com/netcourier/chatbot/service/tools/TrackJobToolAdapter.java†L1-L48】【F:chat-api/src/main/java/com/netcourier/chatbot/service/tools/RescheduleDeliveryToolAdapter.java†L1-L54】【F:chat-api/src/main/java/com/netcourier/chatbot/service/tools/CreateTicketToolAdapter.java†L1-L48】
-* Workflow state: `DefaultWorkflowEngine` extracts slots (e.g., job ID, reschedule window) per conversation and returns `WorkflowResult` metadata to the chat service.【F:chat-api/src/main/java/com/netcourier/chatbot/service/workflow/DefaultWorkflowEngine.java†L1-L110】
+* Workflow state: `StateMachineWorkflowEngine` extracts job IDs, delivery windows, and ticket summaries via Spring StateMachine, persists progress per conversation/workflow key, and exposes tool triggers plus guidance strings for the orchestrator.【F:chat-api/src/main/java/com/netcourier/chatbot/service/workflow/StateMachineWorkflowEngine.java†L31-L204】
 * Intent routing: `DefaultIntentRouter` matches regex patterns across turns and falls back to a configurable intent.【F:chat-api/src/main/java/com/netcourier/chatbot/service/intent/DefaultIntentRouter.java†L1-L43】
 * Memory: `InMemoryMemoryService` keeps turn history in concurrent hash maps; replace with persistent storage for production.【F:chat-api/src/main/java/com/netcourier/chatbot/service/memory/InMemoryMemoryService.java†L1-L40】
 * Security: `SecurityConfig` enables OAuth2 JWT resource server mode and converts roles with `JwtRoleConverter`. Adjust `authorizeExchange` rules when adding endpoints.【F:chat-api/src/main/java/com/netcourier/chatbot/security/SecurityConfig.java†L1-L45】
@@ -71,7 +71,7 @@ mvn spring-boot:run
 ```
 
 * Profiles: defaults to local development. Compose stack sets `SPRING_PROFILES_ACTIVE=prod` and JDBC URLs for Postgres.
-* Run unit tests with `mvn test`; the ingestion suite (`DefaultIngestionServiceTest`, `FixedSizeTextChunkerTest`) demonstrates mocking collaborators and validating chunk post-processing.【F:chat-api/src/test/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionServiceTest.java†L1-L79】【F:chat-api/src/test/java/com/netcourier/chatbot/service/ingestion/FixedSizeTextChunkerTest.java†L1-L62】
+* Run unit tests with `mvn test`; add suites under `src/test/java` as new modules are implemented—the current skeleton focuses on service wiring and external clients.【F:chat-api/pom.xml†L25-L64】
 * For live stream testing, POST JSON payloads to `/api/chat` and read the newline-delimited response.
 
 #### Embeddings service

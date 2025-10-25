@@ -1,6 +1,5 @@
 package com.netcourier.chatbot.service.tools;
 
-import com.netcourier.chatbot.model.ChatRequest;
 import com.netcourier.chatbot.model.ChatContext;
 import com.netcourier.chatbot.model.ChatRequest;
 import io.micrometer.core.instrument.Counter;

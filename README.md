@@ -11,6 +11,17 @@ This repository contains the reference implementation for the multi-tenant NetCo
 | `chat-widget/` | Web component (Lit + Vite) that embeds the chatbot widget into NetCourier Client Portal / Back Office surfaces. |
 | `infra/` | Infrastructure manifests including a Docker Compose stack for local development. |
 
+## Functional Coverage
+
+The implementation aligns with the [NetCourier functional specification](docs/netcourier-functional-spec.md) across core capabilities:
+
+* **Conversational routing & streaming** – `DefaultChatService` persists turns, emits `thinking` / partial / `tool_result` / `final` NDJSON frames, and enforces citation/guardrail metrics while falling back to "I don't know" when no tenant snippets are available.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L42-L147】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L149-L203】
+* **Hybrid RAG retrieval** – `HybridRagService` fuses Qdrant dense results and OpenSearch BM25 hits, with retrievers applying tenant + role filters to prevent data leakage.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/HybridRagService.java†L18-L71】【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/QdrantDenseRetriever.java†L24-L98】【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/OpenSearchSparseRetriever.java†L24-L99】
+* **Intent detection & workflows** – `DefaultIntentRouter` covers regex baselines and optional LLM classification, while `StateMachineWorkflowEngine` manages slot-filling for Track Job, Reschedule Delivery, and Ticket flows and persists state per conversation/workflow pair.【F:chat-api/src/main/java/com/netcourier/chatbot/service/intent/DefaultIntentRouter.java†L18-L62】【F:chat-api/src/main/java/com/netcourier/chatbot/service/intent/LlmIntentClassifier.java†L23-L103】【F:chat-api/src/main/java/com/netcourier/chatbot/service/workflow/StateMachineWorkflowEngine.java†L31-L189】
+* **Tool execution** – Workflow-ready states invoke tool adapters and emit structured tool result payloads so clients can render operational feedback.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L69-L112】【F:chat-api/src/main/java/com/netcourier/chatbot/service/tools/ToolRegistry.java†L15-L63】
+* **Knowledge ingestion** – `IngestionController` and `DefaultIngestionService` support admin file uploads and plain-text ingestion, enrich metadata, enforce default CP/BO roles, and synchronise embeddings/search indexes with deduplication guards.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/IngestionController.java†L24-L75】【F:chat-api/src/main/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionService.java†L41-L200】
+* **Embeddable client widget** – The Lit-based `<nc-chatbot>` component streams NDJSON responses, surfaces guardrail notices, and optionally exposes drag-and-drop ingestion to portal users.【F:chat-widget/src/netcourier-chatbot.ts†L1-L221】【F:chat-widget/src/netcourier-chatbot.ts†L242-L487】
+
 ## Getting Started
 
 ### Prerequisites
