@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: netcourier-chat-api
+  main:
+    web-application-type: reactive
+  jackson:
+    serialization:
+      indent-output: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+chat:
+  rag:
+    dense:
+      top-k: 8
+      weight: 0.6
+    sparse:
+      top-k: 8
+      weight: 0.4
+  qdrant:
+    base-url: http://localhost:6333
+    collection: nc_chunks_v1
+  opensearch:
+    base-url: http://localhost:9200
+    index: nc_chunks
+  netcourier:
+    base-url: http://localhost:8085
+    reschedule-path: /jobs/reschedule
+    track-path: /jobs/track
+    ticket-path: /tickets
