@@ -8,7 +8,7 @@ The chatbot platform comprises three deployable services plus shared dependencie
 
 | Component | Purpose | Key ports |
 | --- | --- | --- |
-| Chat API (`chat-api/`) | Spring Boot WebFlux service exposing REST + SSE chat endpoints, orchestrating intent routing, RAG retrieval, and workflow automation.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L1-L34】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L1-L120】 | 8080 |
+| Chat API (`chat-api/`) | Spring Boot WebFlux service exposing an NDJSON streaming chat endpoint, orchestrating intent routing, RAG retrieval, and workflow automation.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L1-L34】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L1-L178】 | 8080 |
 | Embeddings service (`embeddings-service/`) | FastAPI app serving `/embed` vectors and `/health` checks with cached SentenceTransformer models.【F:embeddings-service/app/main.py†L1-L46】 | 8000 |
 | Chat widget (`chat-widget/`) | Static bundle / web component that calls the Chat API from customer portals.【F:chat-widget/src/netcourier-chatbot.ts†L1-L198】 | Served via CDN |
 | Dependencies | PostgreSQL, Qdrant, OpenSearch; provided in local Compose but use managed services in production.【F:infra/docker-compose.yml†L1-L36】 | 5432 / 6333 / 9200 |
@@ -51,7 +51,7 @@ Store secrets in dedicated secret stores (Vault, AWS Secrets Manager). Inject vi
 
 ## Networking
 
-* Expose the Chat API through an ingress with WebSocket/SSE support. `/api/chat/stream` emits `text/event-stream`; configure timeouts accordingly.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L18-L32】
+* Expose the Chat API through an ingress that permits long-lived HTTP responses. `/api/chat` returns newline-delimited JSON; disable buffering so clients receive frames promptly.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L1-L34】
 * Allow outbound access from Chat API pods to Qdrant, OpenSearch, PostgreSQL, and NetCourier APIs.
 * Embeddings service must reach Hugging Face or internal model registries during cold starts; pre-bake models into images to avoid egress when restricted.
 
@@ -62,7 +62,7 @@ Store secrets in dedicated secret stores (Vault, AWS Secrets Manager). Inject vi
   * Chat API: `/actuator/health` and `/actuator/info` (permitlisted in `SecurityConfig`).【F:chat-api/src/main/java/com/netcourier/chatbot/security/SecurityConfig.java†L24-L33】
   * Embeddings: `/health` returns `{ "status": "ok" }`.【F:embeddings-service/app/main.py†L40-L44】
 * Log aggregation: standardise on JSON logging for containers; ensure sensitive payloads (chat transcripts) are redacted before shipping logs.
-* SLOs: track request latency for `/api/chat`, SSE completion rates, retrieval success rate (non-empty lists), and tool execution success ratio (`ToolExecutionResult.success`).【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L62-L109】
+* SLOs: track request latency for `/api/chat`, stream completion rates, retrieval success rate (non-empty lists), TTFT metrics, and tool execution success ratio (`ToolExecutionResult.success`).【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L62-L132】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L146-L178】
 
 ## Runbooks
 
@@ -75,15 +75,15 @@ Store secrets in dedicated secret stores (Vault, AWS Secrets Manager). Inject vi
    * NetCourier API endpoints referenced in adapters.
 3. If failures relate to JWT authentication, confirm identity provider availability and token audience configuration per `SecurityConfig`.
 
-### SSE stream stalls
+### Stream stalls
 
 1. Confirm the client keeps the HTTP connection open and that load balancers allow streaming (disable response buffering).
-2. Check that `DefaultChatService.streamChat` emits a terminal `status` event; absence indicates an exception before completion—review service logs.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L47-L109】
+2. Check that `DefaultChatService.streamChat` emits `thinking`, optional `tool_result`, then `final` frames; absence indicates an exception before completion—review service logs.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L47-L178】
 3. Validate retrieval latency; empty results still emit responses, but network timeouts from Qdrant/OpenSearch may delay completion.
 
 ### Tool invocation fails repeatedly
 
-1. Identify which tool was requested via SSE `tool` events or workflow summary in the REST response.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L62-L109】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L129-L175】
+1. Identify which tool was requested via `tool_result` frames or workflow summary in the sync response.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L69-L104】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L129-L175】
 2. Use the corresponding adapter to replay the API call manually (e.g., GET `/jobs/track`). Paths are configurable—verify environment values.【F:chat-api/src/main/java/com/netcourier/chatbot/service/tools/TrackJobToolAdapter.java†L19-L48】
 3. Escalate to the NetCourier upstream team if downstream services return non-2xx responses.
 

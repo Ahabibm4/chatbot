@@ -19,7 +19,7 @@ public class DefaultIntentRouter implements IntentRouter {
         this.fallbackIntent = fallbackIntent;
         this.regexIntents = Map.of(
                 Pattern.compile("(?i)reschedule|rebook"), "RESCHEDULE_DELIVERY",
-                Pattern.compile("(?i)track|status"), "TRACK_JOB",
+                Pattern.compile("(?i)track|status|NC\\d{6,}"), "TRACK_JOB",
                 Pattern.compile("(?i)ticket|issue"), "CREATE_TICKET"
         );
     }

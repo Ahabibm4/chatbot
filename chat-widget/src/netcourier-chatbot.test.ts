@@ -1,31 +1,30 @@
-import { applyStreamEvent, createStreamUrl, type ChatMessage, type StreamEvent } from './netcourier-chatbot';
+import { NetCourierChatbot, type ChatMessage, type StreamEvent } from './netcourier-chatbot';
 
-describe('createStreamUrl', () => {
-  it('builds a tenant aware stream url', () => {
-    const url = createStreamUrl('/api', 'tenant-1', 'user-2');
-    expect(url).toBe('/api/chat/stream?tenantId=tenant-1&userId=user-2');
-  });
-});
-
-describe('applyStreamEvent', () => {
-  it('ignores non-message events', () => {
-    const messages: ChatMessage[] = [{ role: 'user', content: 'hello' }];
-    const result = applyStreamEvent(messages, { type: 'status', payload: {} });
-    expect(result).toBe(messages);
+describe('NetCourierChatbot streaming events', () => {
+  it('appends tool_result chunks as assistant updates', () => {
+    const element = new NetCourierChatbot();
+    (element as any).handleEvent({ type: 'tool_result', text: 'Tool finished' } satisfies StreamEvent);
+    const messages = (element as any).messages as ChatMessage[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({ role: 'assistant', content: 'Tool finished', streaming: true });
   });
 
-  it('appends assistant messages from stream', () => {
-    const messages: ChatMessage[] = [];
-    const event: StreamEvent = { type: 'message', payload: { role: 'assistant', content: 'Ready to help!' } };
-    const result = applyStreamEvent(messages, event);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ role: 'assistant', content: 'Ready to help!', streaming: undefined });
-  });
-
-  it('binds citations to the last assistant message', () => {
-    const messages: ChatMessage[] = [{ role: 'assistant', content: 'Summary' }];
-    const event: StreamEvent = { type: 'citations', payload: [{ reference: 'Doc · p.1', snippet: 'Details', title: 'Doc' }] };
-    const result = applyStreamEvent(messages, event);
-    expect(result[0].citations).toEqual([{ reference: 'Doc · p.1', snippet: 'Details', title: 'Doc' }]);
+  it('attaches citations on final events', () => {
+    const element = new NetCourierChatbot();
+    (element as any).handleEvent({
+      type: 'final',
+      text: 'All done',
+      data: {
+        citations: [
+          { title: 'Doc', reference: 'Doc · p.1', snippet: 'Details' }
+        ]
+      }
+    } satisfies StreamEvent);
+    const messages = (element as any).messages as ChatMessage[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].citations).toEqual([
+      { title: 'Doc', reference: 'Doc · p.1', snippet: 'Details' }
+    ]);
+    expect((element as any).pending).toBe(false);
   });
 });

@@ -27,7 +27,7 @@ cd chat-api
 mvn spring-boot:run
 ```
 
-The service exposes REST and SSE endpoints under `http://localhost:8080/api/chat` and auto-generates OpenAPI docs at `/swagger-ui.html`.
+The service exposes an NDJSON streaming endpoint under `http://localhost:8080/api/chat` and auto-generates OpenAPI docs at `/swagger-ui.html`.
 
 #### Document ingestion endpoints
 

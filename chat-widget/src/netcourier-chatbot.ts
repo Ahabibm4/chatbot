@@ -17,7 +17,8 @@ export type ChatMessage = {
 
 export type StreamEvent = {
   type: string;
-  payload: any;
+  text?: string;
+  data?: any;
 };
 
 type TranslationStrings = {
@@ -48,6 +49,7 @@ export class NetCourierChatbot extends LitElement {
   @state() private guardrailNotice: string | null = null;
   @state() private uploading = false;
   @state() private dropActive = false;
+  private sessionIdValue: string | null = null;
 
   static styles = css`
     :host {
@@ -259,6 +261,36 @@ export class NetCourierChatbot extends LitElement {
     });
   }
 
+  private getSessionId(): string {
+    if (!this.sessionIdValue) {
+      if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        this.sessionIdValue = crypto.randomUUID();
+      } else {
+        this.sessionIdValue = `session-${Math.random().toString(16).slice(2)}`;
+      }
+    }
+    return this.sessionIdValue;
+  }
+
+  private processBuffer(buffer: string): string {
+    let working = buffer;
+    let newlineIndex = working.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = working.slice(0, newlineIndex).trim();
+      working = working.slice(newlineIndex + 1);
+      if (line) {
+        try {
+          const event = JSON.parse(line) as StreamEvent;
+          this.handleEvent(event);
+        } catch (error) {
+          console.error('Failed to parse NDJSON chunk', error);
+        }
+      }
+      newlineIndex = working.indexOf('\n');
+    }
+    return working;
+  }
+
   private attachCitations(citations: Citation[]) {
     if (!this.messages.length) {
       return;
@@ -330,70 +362,101 @@ export class NetCourierChatbot extends LitElement {
     }
   }
 
-  private sendMessage(content: string) {
+  private async sendMessage(content: string) {
     if (this.pending) {
       this.controller?.abort();
     }
     this.pending = true;
-    const conversationId = crypto.randomUUID();
     const controller = new AbortController();
     this.controller = controller;
-    const source = new EventSource(createStreamUrl(this.apiBase, this.tenantId, this.userId), { withCredentials: true });
-    source.onmessage = event => {
-      try {
-        const payload = JSON.parse(event.data) as StreamEvent;
-        this.handleEvent(payload);
-      } catch (error) {
-        console.error('Failed to parse stream payload', error);
-      }
-    };
-    source.onerror = () => {
-      source.close();
-      this.pending = false;
-    };
 
-    fetch(`${this.apiBase}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversationId,
+    const submission = {
+      sessionId: this.getSessionId(),
+      message: content,
+      context: {
         tenantId: this.tenantId,
         userId: this.userId,
-        context: { ui: this.ui, locale: this.locale, roles: this.roles },
-        turns: [
-          { role: 'USER', content }
-        ]
-      }),
-      signal: controller.signal
-    })
-      .then(response => response.json())
-      .then(json => {
-        if (json?.citations?.length) {
-          this.attachCitations(json.citations as Citation[]);
-        }
-        if (json?.guardrailAction && json.guardrailAction !== 'ALLOW') {
-          this.guardrailNotice = json.guardrailAction;
-        }
-      })
-      .catch(error => console.error('Chat request failed', error))
-      .finally(() => {
-        this.pending = false;
-        source.close();
+        ui: this.ui ?? 'CP',
+        locale: this.locale ?? 'en',
+        roles: this.roles?.length ? this.roles : undefined
+      }
+    };
+
+    try {
+      const response = await fetch(`${this.apiBase}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submission),
+        signal: controller.signal,
+        credentials: 'include'
       });
+
+      if (!response.ok) {
+        throw new Error(`Chat request failed with status ${response.status}`);
+      }
+
+      const body = response.body;
+      if (!body) {
+        throw new Error('Missing response body');
+      }
+
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+          buffer = this.processBuffer(buffer);
+        }
+        if (done) {
+          buffer += decoder.decode();
+          this.processBuffer(buffer);
+          break;
+        }
+      }
+    } catch (error) {
+      if ((error as DOMException)?.name === 'AbortError') {
+        return;
+      }
+      console.error('Chat request failed', error);
+    } finally {
+      this.pending = false;
+      this.controller = null;
+    }
   }
 
   private handleEvent(event: StreamEvent) {
-    if (event.type === 'citations' && Array.isArray(event.payload)) {
-      this.attachCitations(event.payload as Citation[]);
-      return;
-    }
-    if (event.type === 'guardrail') {
-      this.guardrailNotice = event.payload?.action ?? null;
-      return;
-    }
-    const next = applyStreamEvent(this.messages, event);
-    if (next !== this.messages) {
-      this.messages = next;
+    switch (event.type) {
+      case 'thinking':
+        return;
+      case 'tool_result':
+        if (event.text) {
+          this.appendMessage({ role: 'assistant', content: event.text, streaming: true });
+        }
+        return;
+      case 'final': {
+        const data = event.data ?? {};
+        const guardrailAction = data.guardrailAction as string | undefined;
+        if (guardrailAction && guardrailAction !== 'ALLOW') {
+          this.guardrailNotice = guardrailAction;
+        }
+        if (event.text) {
+          this.appendMessage({ role: 'assistant', content: event.text });
+        }
+        const citations = Array.isArray(data.citations) ? (data.citations as Citation[]) : [];
+        if (citations.length) {
+          this.attachCitations(citations);
+        }
+        this.pending = false;
+        this.controller = null;
+        return;
+      }
+      default:
+        if (event.data && Array.isArray(event.data.citations)) {
+          this.attachCitations(event.data.citations as Citation[]);
+        }
     }
   }
 }
@@ -402,36 +465,4 @@ declare global {
   interface HTMLElementTagNameMap {
     'nc-chatbot': NetCourierChatbot;
   }
-}
-
-export function createStreamUrl(apiBase: string, tenantId: string, userId: string): string {
-  const params = new URLSearchParams({ tenantId, userId });
-  return `${apiBase}/chat/stream?${params.toString()}`;
-}
-
-export function applyStreamEvent(messages: ChatMessage[], event: StreamEvent): ChatMessage[] {
-  if (event.type === 'citations' && Array.isArray(event.payload)) {
-    if (!messages.length) {
-      return messages;
-    }
-    const last = messages[messages.length - 1];
-    if (last.role !== 'assistant') {
-      return messages;
-    }
-    const updated = { ...last, citations: event.payload as Citation[] };
-    return [...messages.slice(0, -1), updated];
-  }
-  if (event.type !== 'message') {
-    return messages;
-  }
-  const payload = event.payload as Partial<ChatMessage> | undefined;
-  if (!payload?.content) {
-    return messages;
-  }
-  const nextMessage: ChatMessage = {
-    role: payload.role === 'user' ? 'user' : 'assistant',
-    content: payload.content,
-    streaming: payload.streaming,
-  };
-  return [...messages, nextMessage];
 }
