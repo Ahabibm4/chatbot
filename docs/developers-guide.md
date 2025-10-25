@@ -21,6 +21,7 @@ The repository is organised as a polyglot monorepo:
 * HTTP surface: `ChatController` exposes `/api/chat` for request/response conversations and `/api/chat/stream` for SSE streams.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/ChatController.java†L1-L34】
 * Conversation flow: `DefaultChatService` coordinates memory, intent routing, hybrid RAG, workflow execution, and tool invocation before persisting assistant turns and emitting SSE frames.【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L1-L120】【F:chat-api/src/main/java/com/netcourier/chatbot/service/DefaultChatService.java†L122-L187】
 * Retrieval: `HybridRagService` fuses Qdrant dense similarity and OpenSearch BM25 results with configurable weights and top-k limits.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/HybridRagService.java†L1-L54】
+* Ingestion: `IngestionController` surfaces `POST /admin/ingest/upload` (multipart) and `POST /api/ingest` (JSON text) so administrators can push tenant knowledge into the vector and search stores.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/IngestionController.java†L1-L63】 `DefaultIngestionService` orchestrates extraction via Apache Tika, chunking, embedding, and persistence to Qdrant/OpenSearch with consistent metadata.【F:chat-api/src/main/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionService.java†L1-L120】【F:chat-api/src/main/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionService.java†L122-L196】
 * External systems:
   * Qdrant dense retriever issues `/points/search` queries to the configured collection.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/QdrantDenseRetriever.java†L1-L74】
   * OpenSearch sparse retriever runs `_search` against the multi-tenant index alias.【F:chat-api/src/main/java/com/netcourier/chatbot/service/retrieval/OpenSearchSparseRetriever.java†L1-L67】
@@ -70,7 +71,7 @@ mvn spring-boot:run
 ```
 
 * Profiles: defaults to local development. Compose stack sets `SPRING_PROFILES_ACTIVE=prod` and JDBC URLs for Postgres.
-* Run unit tests with `mvn test`; the sample `DefaultIntentRouterTest` demonstrates AssertJ and JUnit 5 usage.【F:chat-api/src/test/java/com/netcourier/chatbot/DefaultIntentRouterTest.java†L1-L26】
+* Run unit tests with `mvn test`; the ingestion suite (`DefaultIngestionServiceTest`, `FixedSizeTextChunkerTest`) demonstrates mocking collaborators and validating chunk post-processing.【F:chat-api/src/test/java/com/netcourier/chatbot/service/ingestion/DefaultIngestionServiceTest.java†L1-L79】【F:chat-api/src/test/java/com/netcourier/chatbot/service/ingestion/FixedSizeTextChunkerTest.java†L1-L62】
 * For live SSE testing, POST JSON payloads to `/api/chat/stream` using tools like `curl` or [EventSource polyfills].
 
 #### Embeddings service
@@ -131,6 +132,7 @@ Configure these via `application.yml`, `application-*.yml`, or environment varia
 ## Common development tasks
 
 * **Add a new intent**: extend `regexIntents` or implement `IntentRouter`, adjust `WorkflowEngine`, and register any tool adapters.
+* **Ingest tenant knowledge**: use `POST /admin/ingest/upload` for binary files or `POST /api/ingest` for inline text. During phase-one development the static token `Authorization: Bearer DEV` is sufficient; production will replace this with JWT validation.【F:chat-api/src/main/java/com/netcourier/chatbot/controller/IngestionController.java†L1-L63】
 * **Persist conversations**: replace `InMemoryMemoryService` with a persistence-backed implementation and expose repository beans.
 * **Telemetry**: enable Micrometer tracing via `management.tracing.enabled=true`; `TracingConfig` wires `SpanCustomizer` when tracing is active.【F:chat-api/src/main/java/com/netcourier/chatbot/telemetry/TracingConfig.java†L1-L16】
 * **Extend widget UI**: update `render()` and styles in `netcourier-chatbot.ts`, keeping properties reactive and accessible.

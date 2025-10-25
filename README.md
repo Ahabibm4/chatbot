@@ -29,6 +29,28 @@ mvn spring-boot:run
 
 The service exposes REST and SSE endpoints under `http://localhost:8080/api/chat` and auto-generates OpenAPI docs at `/swagger-ui.html`.
 
+#### Document ingestion endpoints
+
+Phase-one of the ingestion workflow ships two administrative endpoints that ingest tenant knowledge into Qdrant and OpenSearch:
+
+* `POST /admin/ingest/upload` accepts `multipart/form-data` uploads for PDF, DOCX, and TXT files.
+* `POST /api/ingest` ingests plain text payloads as JSON.
+
+Both endpoints expect a tenant identifier, optional title, and optional role tags. When no roles are supplied, the service tags chunks with the default `CP` and `BO` roles so they are visible to both customer-portal and back-office users. During phase-one you can authenticate by passing a static bearer token: `Authorization: Bearer DEV`.
+
+Example file upload using `curl`:
+
+```bash
+curl -X POST "http://localhost:8080/admin/ingest/upload" \
+  -H "Authorization: Bearer DEV" \
+  -F tenantId=ILG \
+  -F title="Delivery SOP" \
+  -F roles=CP \
+  -F file=@docs/sample.pdf
+```
+
+Successful ingestion returns a JSON summary containing the generated document identifier and the number of chunks pushed to the vector and search stores.
+
 ### Running the Embeddings Service
 
 ```bash

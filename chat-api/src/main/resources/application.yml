@@ -30,3 +30,9 @@ chat:
     reschedule-path: /jobs/reschedule
     track-path: /jobs/track
     ticket-path: /tickets
+  embeddings:
+    base-url: http://localhost:9000
+  ingest:
+    chunk-size: 800
+    overlap: 200
+    default-roles: CP,BO
