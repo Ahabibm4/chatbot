@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Callable, Dict, List
 
@@ -36,11 +37,13 @@ def load_model(model_name: str) -> SentenceTransformer:
 ModelLoader = Callable[[str], SentenceTransformer]
 
 
-def build_app(default_model: str = "BAAI/bge-small-en-v1.5",
-              model_loader: ModelLoader | None = None) -> FastAPI:
+def build_app(default_model: str = "BAAI/bge-m3",
+              model_loader: ModelLoader | None = None,
+              warm_start_async: bool = True) -> FastAPI:
     app = FastAPI(title="NetCourier Embeddings Service", version="1.0.0")
     model_cache: Dict[str, SentenceTransformer] = {}
     loader = model_loader or load_model
+    warm_start_task: asyncio.Task[SentenceTransformer] | None = None
 
     def get_model(name: str) -> SentenceTransformer:
         if name not in model_cache:
@@ -49,8 +52,22 @@ def build_app(default_model: str = "BAAI/bge-small-en-v1.5",
 
     @app.on_event("startup")
     async def _startup() -> None:
-        logger.info("Warm starting embeddings model %s", default_model)
-        get_model(default_model)
+        nonlocal warm_start_task
+        if warm_start_async:
+            logger.info("Warm starting embeddings model %s asynchronously", default_model)
+            loop = asyncio.get_running_loop()
+            warm_start_task = loop.create_task(asyncio.to_thread(get_model, default_model))
+
+            def _log_warm_start_result(task: asyncio.Task[SentenceTransformer]) -> None:
+                try:
+                    task.result()
+                except Exception:
+                    logger.exception("Asynchronous warm start failed for %s", default_model)
+
+            warm_start_task.add_done_callback(_log_warm_start_result)
+        else:
+            logger.info("Warm starting embeddings model %s", default_model)
+            await asyncio.to_thread(get_model, default_model)
 
     @app.post("/embed", response_model=EmbedResponse)
     async def embed(request: EmbedRequest) -> EmbedResponse:
