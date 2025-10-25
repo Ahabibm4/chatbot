@@ -55,6 +55,21 @@ chat:
     ticket-path: /tickets
   embeddings:
     base-url: http://localhost:9000
+  llm:
+    base-url: http://localhost:1234
+    api-key: ${CHAT_LLM_API_KEY:dev-token}
+    model: netcourier-llama-3.1
+    temperature: 0.35
+    max-output-tokens: 1500
+    timeout-seconds: 60
+  intent:
+    fallback: RAG_FAQ
+    llm:
+      enabled: true
+      threshold: 0.55
+      model: ${chat.llm.model}
+      temperature: 0.0
+      max-output-tokens: 384
   ingest:
     chunk-size: 800
     overlap: 200

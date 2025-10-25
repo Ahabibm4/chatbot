@@ -1,11 +1,13 @@
 package com.netcourier.chatbot.service.orchestration;
 
 import com.netcourier.chatbot.model.RetrievedChunk;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 @Component
+@Profile("template")
 public class TemplateLlmClient implements LlmClient {
 
     @Override
