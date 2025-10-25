@@ -193,3 +193,37 @@ The NetCourier AI Chatbot is a multi-tenant, retrieval-augmented generation (RAG
 * **Scaling costs:** GPU autoscaling, quotas, nightly reports.
 * **Data inconsistency on updates:** Version + alias swap, rollback support.
 
+## 10. Disaster Recovery & Business Continuity
+
+* **RTO / RPO Targets:** Define recovery time objective (RTO) of < 30 minutes for application services and recovery point objective (RPO) of < 15 minutes for conversational data and knowledge store indexes.
+* **Cross-Region Redundancy:** Deploy active/passive replicas of Kubernetes workloads, PostgreSQL, Qdrant, and OpenSearch in a secondary region with asynchronous replication; maintain warm standby LLM runtime capacity.
+* **Backups & Snapshots:** Automate encrypted daily backups of PostgreSQL and object storage snapshots of Qdrant/OpenSearch; retain for 30 days with weekly integrity verification restores in staging.
+* **Runbooks & Incident Response:** Maintain documented failover runbooks, DR drills at least twice per year, and post-incident reviews with corrective actions tracked in Jira.
+
+## 11. Compliance & Data Governance
+
+* **Regulatory Alignment:** Map controls to GDPR, SOC 2, and contractual obligations; document data processing activities and maintain records of processing for each tenant.
+* **Data Retention & Deletion:** Enforce configurable retention periods per tenant for conversations and tool runs; implement automated deletion workflows and support data subject access/erasure requests.
+* **Access Governance:** Centralize secret management (Vault/KMS), quarterly access reviews, and least-privilege IAM policies for operations staff and service accounts.
+* **Auditability:** Emit immutable audit logs for ingest actions, administrative changes, and tool executions; store logs for a minimum of one year in write-once object storage.
+
+## 12. Testing & Evaluation Strategy
+
+* **Automated Testing:** Integrate unit, contract, and integration test suites for the Spring Boot API, embeddings service, and widget within CI; enforce coverage thresholds and static analysis (SpotBugs, ESLint, mypy/ruff).
+* **Performance & Load Testing:** Execute scheduled k6/Gatling load tests to validate P95 < 6s and concurrency targets; capture regressions via automated thresholds in CI/CD.
+* **RAG Quality Evaluation:** Maintain curated evaluation datasets per tenant; run nightly offline benchmarks measuring accuracy, citation correctness, and hallucination rates with pass/fail gates.
+* **Chaos & Resilience Testing:** Periodically inject failures (pod restarts, dependency outages) in staging to validate graceful degradation, retries, and DR procedures.
+
+## 13. Accessibility & Localization
+
+* **Accessibility Standards:** Ensure the chat widget complies with WCAG 2.1 AA, including keyboard navigation, ARIA roles, focus management, and contrast ratios; include accessibility testing in CI.
+* **Localization Pipeline:** Support i18n resource bundles with fallback locales, pluralization rules, and tenant-level language overrides; automate translation extraction and validation.
+* **Content Considerations:** Provide localized system prompts, tool messages, and error responses; ensure citation formatting adapts to locale conventions.
+
+## 14. Rate Limiting & Abuse Prevention
+
+* **Traffic Controls:** Implement tenant- and user-level throttling on chat and ingest endpoints (e.g., token buckets) with burst allowances aligned to SLAs.
+* **Anomaly Detection:** Monitor for unusual traffic patterns, token consumption spikes, or repeated tool failures; trigger automated alerts and temporary rate adjustments.
+* **Abuse Mitigations:** Integrate WAF/bot detection, request validation, and content filtering for prompt injection; quarantine suspicious sessions pending review.
+* **Operational Response:** Provide runbooks for abuse incidents, including escalation paths, evidence capture, and remediation steps coordinated with security operations.
+
