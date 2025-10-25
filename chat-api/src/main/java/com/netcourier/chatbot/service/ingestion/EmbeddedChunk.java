@@ -7,5 +7,6 @@ public record EmbeddedChunk(String id,
                             int page,
                             String text,
                             List<String> roles,
+                            DocumentMetadata metadata,
                             List<Double> vector) {
 }

@@ -6,5 +6,5 @@ public interface DocumentTextExtractor {
 
     ExtractedDocument extract(String filename, InputStream inputStream);
 
-    record ExtractedDocument(String title, String text) {}
+    record ExtractedDocument(DocumentMetadata metadata, String text) {}
 }

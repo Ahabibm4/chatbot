@@ -10,8 +10,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Component
@@ -22,13 +25,19 @@ public class OpenSearchSparseRetriever implements SparseRetriever {
     private final WebClient openSearchWebClient;
     private final String indexAlias;
     private final int topK;
+    private final String tenantField;
+    private final String rolesField;
 
     public OpenSearchSparseRetriever(WebClient openSearchWebClient,
                                      @Value("${chat.opensearch.index:nc_chunks}") String indexAlias,
-                                     @Value("${chat.rag.sparse.top-k:8}") int topK) {
+                                     @Value("${chat.rag.sparse.top-k:8}") int topK,
+                                     @Value("${chat.opensearch.tenant-field:tenantId}") String tenantField,
+                                     @Value("${chat.opensearch.roles-field:roles}") String rolesField) {
         this.openSearchWebClient = openSearchWebClient;
         this.indexAlias = indexAlias;
         this.topK = topK;
+        this.tenantField = tenantField;
+        this.rolesField = rolesField;
     }
 
     @Override
@@ -36,7 +45,7 @@ public class OpenSearchSparseRetriever implements SparseRetriever {
         String queryText = Optional.ofNullable(request.turns().isEmpty() ? null : request.turns().getLast().content())
                 .filter(text -> !text.isBlank())
                 .orElse("help");
-        var query = new SparseQuery(queryText, request.tenantId(), request.context() != null ? request.context().roles() : null, topK);
+        OpenSearchQuery query = buildQuery(request, queryText);
         try {
             OpenSearchResponse response = openSearchWebClient.post()
                     .uri("/{index}/_search", indexAlias)
@@ -59,7 +68,21 @@ public class OpenSearchSparseRetriever implements SparseRetriever {
         }
     }
 
-    private record SparseQuery(String query, String tenantId, Iterable<String> roles, int size) {}
+    private OpenSearchQuery buildQuery(ChatRequest request, String queryText) {
+        List<Map<String, Object>> filters = new ArrayList<>();
+        filters.add(Map.of("term", Map.of(tenantField, request.tenantId())));
+        if (request.context() != null && request.context().roles() != null && !request.context().roles().isEmpty()) {
+            filters.add(Map.of("terms", Map.of(rolesField, request.context().roles())));
+        }
+        Map<String, Object> match = Map.of("match", Map.of("text", Map.of("query", queryText)));
+        Map<String, Object> bool = new LinkedHashMap<>();
+        bool.put("filter", filters);
+        bool.put("must", List.of(match));
+        Map<String, Object> query = Map.of("bool", bool);
+        return new OpenSearchQuery(topK, query, List.of("docId", "title", "page", "text"));
+    }
+
+    private record OpenSearchQuery(int size, Map<String, Object> query, List<String> _source) {}
 
     private record OpenSearchResponse(List<Hit> hits) {
         List<RetrievedChunk> toChunks() {

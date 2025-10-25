@@ -7,17 +7,29 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
 import java.util.Map;
 
 @Component
 public class RescheduleDeliveryToolAdapter extends BaseApiToolAdapter {
 
     private final String path;
+    private final ToolSpecification specification;
 
     public RescheduleDeliveryToolAdapter(WebClient netCourierApiClient,
                                          @Value("${chat.netcourier.reschedule-path:/jobs/reschedule}") String path) {
         super(netCourierApiClient);
         this.path = path;
+        this.specification = new ToolSpecification(
+                name(),
+                List.of("BO"),
+                Map.of(
+                        "jobId", String.class,
+                        "newWindow", String.class
+                ),
+                List.of("jobId", "newWindow"),
+                true
+        );
     }
 
     @Override
@@ -28,6 +40,11 @@ public class RescheduleDeliveryToolAdapter extends BaseApiToolAdapter {
     @Override
     public boolean supports(String toolName) {
         return name().equalsIgnoreCase(toolName);
+    }
+
+    @Override
+    public ToolSpecification specification() {
+        return specification;
     }
 
     @Override

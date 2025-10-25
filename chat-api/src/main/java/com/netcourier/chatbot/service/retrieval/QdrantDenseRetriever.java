@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -22,13 +23,22 @@ public class QdrantDenseRetriever implements DenseRetriever {
     private final WebClient qdrantWebClient;
     private final String collection;
     private final int topK;
+    private final String vectorName;
+    private final String tenantField;
+    private final String roleField;
 
     public QdrantDenseRetriever(WebClient qdrantWebClient,
                                 @Value("${chat.qdrant.collection:nc_chunks_v1}") String collection,
-                                @Value("${chat.rag.dense.top-k:8}") int topK) {
+                                @Value("${chat.rag.dense.top-k:8}") int topK,
+                                @Value("${chat.qdrant.vector-name:text_embeddings}") String vectorName,
+                                @Value("${chat.qdrant.filters.tenant-field:tenantId}") String tenantField,
+                                @Value("${chat.qdrant.filters.role-field:roles}") String roleField) {
         this.qdrantWebClient = qdrantWebClient;
         this.collection = collection;
         this.topK = topK;
+        this.vectorName = vectorName;
+        this.tenantField = tenantField;
+        this.roleField = roleField;
     }
 
     @Override
@@ -36,7 +46,7 @@ public class QdrantDenseRetriever implements DenseRetriever {
         String query = Optional.ofNullable(request.turns().isEmpty() ? null : request.turns().getLast().content())
                 .filter(content -> !content.isBlank())
                 .orElse("Hello");
-        DenseQueryPayload payload = new DenseQueryPayload(query, request.tenantId(), topK);
+        DenseQueryPayload payload = new DenseQueryPayload(query, topK, vectorName, buildFilter(request));
         try {
             QdrantResponse response = qdrantWebClient.post()
                     .uri("/collections/{collection}/points/search", collection)
@@ -59,7 +69,55 @@ public class QdrantDenseRetriever implements DenseRetriever {
         }
     }
 
-    private record DenseQueryPayload(String query, String tenantId, int limit) {}
+    private QueryFilter buildFilter(ChatRequest request) {
+        QueryFilterBuilder builder = new QueryFilterBuilder().mustMatch(tenantField, request.tenantId());
+        if (request.context() != null && request.context().roles() != null && !request.context().roles().isEmpty()) {
+            builder.mustAny(roleField, request.context().roles().stream().toList());
+        }
+        return builder.build();
+    }
+
+    private record DenseQueryPayload(String query, int limit, String vector, QueryFilter filter, boolean withPayload) {
+        private DenseQueryPayload(String query, int limit, String vector, QueryFilter filter) {
+            this(query, limit, vector, filter, true);
+        }
+    }
+
+    private record QueryFilter(List<FieldCondition> must) {}
+
+    private record FieldCondition(String key, Match match) {}
+
+    private record Match(String value, List<String> any) {
+        private static Match value(String value) {
+            return new Match(value, null);
+        }
+
+        private static Match any(List<String> any) {
+            return new Match(null, any);
+        }
+    }
+
+    private static class QueryFilterBuilder {
+        private final List<FieldCondition> must = new ArrayList<>();
+
+        QueryFilterBuilder mustMatch(String key, String value) {
+            if (value != null && !value.isBlank()) {
+                must.add(new FieldCondition(key, Match.value(value)));
+            }
+            return this;
+        }
+
+        QueryFilterBuilder mustAny(String key, List<String> values) {
+            if (values != null && !values.isEmpty()) {
+                must.add(new FieldCondition(key, Match.any(values)));
+            }
+            return this;
+        }
+
+        QueryFilter build() {
+            return must.isEmpty() ? null : new QueryFilter(List.copyOf(must));
+        }
+    }
 
     private record QdrantResponse(List<Result> result) {
         List<RetrievedChunk> toChunks() {

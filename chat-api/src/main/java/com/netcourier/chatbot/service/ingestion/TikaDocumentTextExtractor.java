@@ -12,6 +12,11 @@ import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 @Component
@@ -31,18 +36,55 @@ public class TikaDocumentTextExtractor implements DocumentTextExtractor {
                     .map(content -> new String(content.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8))
                     .map(String::trim)
                     .orElse("");
-            if (text.isBlank()) {
-                throw new IngestionException(HttpStatus.BAD_REQUEST, "Uploaded file does not contain extractable text");
-            }
-            String title = Optional.ofNullable(metadata.get(Metadata.TITLE))
-                    .filter(value -> !value.isBlank())
-                    .orElseGet(() -> defaultTitle(filename));
-            return new ExtractedDocument(title, text);
-        } catch (IngestionException ex) {
-            throw ex;
+
+            DocumentMetadata docMetadata = buildMetadata(metadata, filename);
+            return new ExtractedDocument(docMetadata, text);
         } catch (Exception e) {
             log.error("Failed to extract text from document {}", filename, e);
             throw new IngestionException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to extract document text", e);
+        }
+    }
+
+    private DocumentMetadata buildMetadata(Metadata metadata, String filename) {
+        String title = Optional.ofNullable(metadata.get(Metadata.TITLE))
+                .filter(value -> !value.isBlank())
+                .orElseGet(() -> defaultTitle(filename));
+        DocumentMetadata enriched = DocumentMetadata.empty()
+                .withTitle(title)
+                .withAuthor(metadata.get(Metadata.AUTHOR))
+                .withContentType(metadata.get(Metadata.CONTENT_TYPE))
+                .withAttributes(extractAttributes(metadata));
+        OffsetDateTime created = parseDate(metadata.get(Metadata.CREATION_DATE));
+        if (created != null) {
+            enriched = enriched.withCreatedAt(created);
+        }
+        return enriched.ensureImmutable();
+    }
+
+    private Map<String, String> extractAttributes(Metadata metadata) {
+        Map<String, String> attributes = new HashMap<>();
+        for (String name : metadata.names()) {
+            String value = metadata.get(name);
+            if (value != null && !value.isBlank()) {
+                attributes.put(name, value);
+            }
+        }
+        return attributes;
+    }
+
+    private OffsetDateTime parseDate(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value);
+        } catch (DateTimeParseException ignored) {
+            try {
+                return OffsetDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            } catch (DateTimeParseException ex) {
+                log.debug("Unable to parse creation date {}", value, ex);
+                return null;
+            }
         }
     }
 

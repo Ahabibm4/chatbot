@@ -15,5 +15,11 @@ export default defineConfig({
         globals: {}
       }
     }
+  },
+  test: {
+    environment: 'happy-dom',
+    coverage: {
+      reporter: ['text', 'json-summary']
+    }
   }
 });
